@@ -1,0 +1,258 @@
+{
+  "test_summary": {
+    "total_questions": 8,
+    "categories": [
+      "basic_safety",
+      "risk_assessment",
+      "emergency_systems",
+      "safety_ratings",
+      "machine_guarding",
+      "loto_procedures",
+      "functional_safety",
+      "safety_calculations"
+    ],
+    "difficulty_distribution": {
+      "easy": 1,
+      "medium": 4,
+      "hard": 3
+    }
+  },
+  "overall_performance": {
+    "answer_rates": {
+      "baseline": 1.0,
+      "hybrid": 1.0,
+      "improvement": 0.0
+    },
+    "average_confidence": {
+      "baseline": 0.7449629455804825,
+      "hybrid": 0.8040781589584255,
+      "improvement": 0.05911521337794301
+    },
+    "confidence_improvements": {
+      "positive": 8,
+      "negative": 0,
+      "unchanged": 0,
+      "average_improvement": 0.05911521337794301
+    },
+    "ranking_changes": {
+      "total": 7,
+      "percentage": 0.875
+    },
+    "response_times": {
+      "baseline_avg": 0.10954391956329346,
+      "hybrid_avg": 0.01902136206626892
+    }
+  },
+  "category_breakdown": {
+    "basic_safety": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.7437182664871216,
+        "hybrid": 0.7813609838485718
+      }
+    },
+    "risk_assessment": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.7815513014793396,
+        "hybrid": 0.8007924199104309
+      }
+    },
+    "emergency_systems": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.7127436399459839,
+        "hybrid": 0.76853104565438
+      }
+    },
+    "safety_ratings": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.8264787197113037,
+        "hybrid": 0.8769493445112087
+      }
+    },
+    "machine_guarding": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.7695996761322021,
+        "hybrid": 0.8387197732925415
+      }
+    },
+    "loto_procedures": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.6910532116889954,
+        "hybrid": 0.770371657624862
+      }
+    },
+    "functional_safety": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.6984114646911621,
+        "hybrid": 0.7888880252838135
+      }
+    },
+    "safety_calculations": {
+      "question_count": 1,
+      "answer_rate": {
+        "baseline": 1.0,
+        "hybrid": 1.0
+      },
+      "avg_confidence": {
+        "baseline": 0.7361472845077515,
+        "hybrid": 0.8070120215415955
+      }
+    }
+  },
+  "detailed_results": [
+    {
+      "question": "What are the basic safety requirements for industrial machinery?",
+      "category": "basic_safety",
+      "difficulty": "easy",
+      "baseline_confidence": 0.7437182664871216,
+      "hybrid_confidence": 0.7813609838485718,
+      "confidence_improvement": 0.037642717361450195,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.6876609325408936,
+        "hybrid": 0.021529197692871094
+      }
+    },
+    {
+      "question": "How do you perform a risk assessment according to EN ISO 12100?",
+      "category": "risk_assessment",
+      "difficulty": "medium",
+      "baseline_confidence": 0.7815513014793396,
+      "hybrid_confidence": 0.8007924199104309,
+      "confidence_improvement": 0.01924111843109133,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.03897213935852051,
+        "hybrid": 0.016810894012451172
+      }
+    },
+    {
+      "question": "What are the requirements for emergency stop systems in industrial machinery?",
+      "category": "emergency_systems",
+      "difficulty": "medium",
+      "baseline_confidence": 0.7127436399459839,
+      "hybrid_confidence": 0.76853104565438,
+      "confidence_improvement": 0.05578740570839613,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.038938045501708984,
+        "hybrid": 0.01888108253479004
+      }
+    },
+    {
+      "question": "Explain the difference between SIL and PL safety ratings",
+      "category": "safety_ratings",
+      "difficulty": "hard",
+      "baseline_confidence": 0.8264787197113037,
+      "hybrid_confidence": 0.8769493445112087,
+      "confidence_improvement": 0.05047062479990494,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": false,
+      "response_times": {
+        "baseline": 0.01370859146118164,
+        "hybrid": 0.018903017044067383
+      }
+    },
+    {
+      "question": "What machine guarding methods are required for point of operation protection?",
+      "category": "machine_guarding",
+      "difficulty": "medium",
+      "baseline_confidence": 0.7695996761322021,
+      "hybrid_confidence": 0.8387197732925415,
+      "confidence_improvement": 0.0691200971603394,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.016243934631347656,
+        "hybrid": 0.022467613220214844
+      }
+    },
+    {
+      "question": "How should lockout/tagout procedures be implemented for machinery maintenance?",
+      "category": "loto_procedures",
+      "difficulty": "medium",
+      "baseline_confidence": 0.6910532116889954,
+      "hybrid_confidence": 0.770371657624862,
+      "confidence_improvement": 0.07931844593586668,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.01233363151550293,
+        "hybrid": 0.019332170486450195
+      }
+    },
+    {
+      "question": "What are the Category 4 requirements according to EN ISO 13849-1?",
+      "category": "functional_safety",
+      "difficulty": "hard",
+      "baseline_confidence": 0.6984114646911621,
+      "hybrid_confidence": 0.7888880252838135,
+      "confidence_improvement": 0.09047656059265141,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.03485226631164551,
+        "hybrid": 0.017082691192626953
+      }
+    },
+    {
+      "question": "How do you calculate the required Performance Level (PLr) for a safety function?",
+      "category": "safety_calculations",
+      "difficulty": "hard",
+      "baseline_confidence": 0.7361472845077515,
+      "hybrid_confidence": 0.8070120215415955,
+      "confidence_improvement": 0.070864737033844,
+      "baseline_answered": true,
+      "hybrid_answered": true,
+      "ranking_changed": true,
+      "response_times": {
+        "baseline": 0.033641815185546875,
+        "hybrid": 0.017164230346679688
+      }
+    }
+  ]
+}
