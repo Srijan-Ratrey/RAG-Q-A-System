@@ -250,21 +250,29 @@ python src/api.py
 # If port 5000 is in use: FLASK_PORT=8080 python src/api.py
 ```
 
-### 4. Test with cURL (Easy Question)
+### 4. Test with Working cURL Examples
+
+**Easy Question Example (General Safety):**
 ```bash
 curl -X POST http://localhost:5000/ask \
   -H "Content-Type: application/json" \
   -d '{"q": "What are machine safety requirements?", "k": 5, "mode": "hybrid"}'
 ```
 
-### 5. Test with cURL (Complex Question)  
+**Tricky Question Example (Technical Calculation):**
 ```bash
 curl -X POST http://localhost:5000/ask \
   -H "Content-Type: application/json" \
   -d '{"q": "How do you calculate Performance Level PLr for safety functions?", "k": 3, "mode": "baseline"}'
 ```
 
-### 4. Run Full Evaluation
+Both examples return JSON responses with:
+- `answer`: Extracted text or null if abstaining
+- `contexts`: Relevant document chunks with scores
+- `confidence`: Answer confidence score
+- `reranker_used`: Search mode employed
+
+### 5. Run Full Evaluation
 ```bash
 python evaluation.py
 ```
