@@ -277,7 +277,7 @@ Both examples return JSON responses with:
 python evaluation.py
 ```
 
-## 🎓 What We Learned
+## 🎓 What I Learned
 
 ### **Technical Insights**
 1. **Hybrid reranking works**: BM25 + vector scoring improved confidence by 5.9%
@@ -299,5 +299,5 @@ python evaluation.py
 
 ---
 
-**Status**: ✅ Complete | Production Ready 🚀  
+**Status**: ✅ Complete  
 **Final Statistics**: 3,084 chunks | 20 documents | 8/8 test questions answered | +5.9% confidence improvement
