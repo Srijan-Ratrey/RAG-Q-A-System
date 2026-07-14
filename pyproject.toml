@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-qa-system"
+version = "1.0.0"
+description = "Retrieval-augmented Q&A over industrial safety documents (hybrid / RRF / cross-encoder retrieval)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+dependencies = [
+    "sentence-transformers>=2.3.1",
+    "faiss-cpu>=1.7.4",
+    "transformers>=4.30.2",
+    "pypdf>=3.14.0",
+    "nltk>=3.8.1",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "gunicorn>=21.2.0",
+    "rank-bm25>=0.2.2",
+    "numpy>=1.24.3",
+    "tqdm>=4.65.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0"]
+
+[project.scripts]
+rag-api = "rag_qa.api:main"
+rag-eval = "rag_qa.evaluation.heuristic:main"
+rag-ir-eval = "rag_qa.evaluation.ir:main"
+
+[tool.setuptools]
+packages = ["rag_qa", "rag_qa.evaluation"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]

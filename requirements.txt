@@ -1,32 +1,24 @@
 # Core ML and NLP libraries
-sentence-transformers>=2.3.1  # For all-MiniLM-L6-v2 embeddings (updated for compatibility)
-faiss-cpu>=1.7.4              # Vector similarity search
-transformers>=4.30.2          # HuggingFace transformers
+sentence-transformers>=2.3.1   # all-MiniLM-L6-v2 embeddings + optional cross-encoder reranker
+faiss-cpu>=1.7.4               # Vector similarity search
+transformers>=4.30.2          # HuggingFace transformers (pulled in by sentence-transformers)
 
 # Document processing
-PyPDF2==3.0.1                 # PDF text extraction
-pypdf==3.14.0                 # Alternative PDF processing
-nltk==3.8.1                   # Text processing and tokenization
-
-# Database and storage
-# sqlite3 is built-in with Python
-sqlalchemy==2.0.19           # Database ORM
+pypdf>=3.14.0                 # PDF text extraction (supersedes the deprecated PyPDF2)
+nltk>=3.8.1                   # Sentence/word tokenization (also needs punkt_tab on newer versions)
 
 # Web API
-flask==2.3.2                 # Web framework for API
-flask-cors==4.0.0            # CORS support
+flask>=3.0.0                  # Web framework for API
+flask-cors>=4.0.0            # CORS support
+gunicorn>=21.2.0             # Production WSGI server (dev server is not for production)
 
 # Search and ranking
-rank-bm25==0.2.2             # BM25 keyword scoring
-scikit-learn==1.3.0          # Machine learning for reranker
+rank-bm25>=0.2.2             # BM25 keyword scoring
 
 # Utilities
-numpy==1.24.3
-pandas==2.0.3
-tqdm==4.65.0                  # Progress bars
-python-dotenv==1.0.0         # Environment variables
-requests==2.31.0             # HTTP requests
+numpy>=1.24.3                # (>=1.26 required for Python 3.12+)
+tqdm>=4.65.0                 # Progress bars
+requests>=2.31.0             # HTTP requests (used by the download helper)
 
-# Testing and development
-pytest==7.4.0
-jupyter==1.0.0               # For development and analysis
+# Testing
+pytest>=7.4.0

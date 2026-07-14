@@ -13,17 +13,21 @@ from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
-import PyPDF2
 import pypdf
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from tqdm import tqdm
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+# Download required NLTK data. Newer NLTK (>=3.8.2) splits the tokenizer
+# tables into a separate ``punkt_tab`` package, so guard for both.
+for _resource in ('punkt', 'punkt_tab'):
+    try:
+        nltk.data.find(f'tokenizers/{_resource}')
+    except (LookupError, OSError):
+        try:
+            nltk.download(_resource, quiet=True)
+        except Exception:  # pragma: no cover - network/offline fallback
+            pass
 
 @dataclass
 class DocumentChunk:
@@ -67,7 +71,8 @@ class DocumentProcessor:
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         
-        # Load sources metadata
+        # Load sources metadata (also populates self.sources_by_filename).
+        self.sources_by_filename: Dict[str, Dict] = {}
         self.sources_metadata = self._load_sources_metadata()
         
         # Ensure database directory exists
@@ -82,14 +87,22 @@ class DocumentProcessor:
             with open(self.sources_file, 'r', encoding='utf-8') as f:
                 sources_list = json.load(f)
             
-            # Convert to dict for easier lookup by title
+            # Convert to dict for easier lookup by title. Also build an exact
+            # filename index from any entries that declare a ``filename`` field
+            # (the reliable way to attribute a chunk to its source).
             sources_dict = {}
+            self.sources_by_filename = {}
             for source in sources_list:
-                # Create a simplified filename key for matching
                 title = source['title']
                 sources_dict[title] = source
-            
-            self.logger.info(f"Loaded metadata for {len(sources_dict)} sources")
+                filename = source.get('filename')
+                if filename:
+                    self.sources_by_filename[filename.lower()] = source
+
+            self.logger.info(
+                f"Loaded metadata for {len(sources_dict)} sources "
+                f"({len(self.sources_by_filename)} with explicit filenames)"
+            )
             return sources_dict
             
         except Exception as e:
@@ -129,10 +142,13 @@ class DocumentProcessor:
                 )
             """)
             
-            # Create indexes for better search performance
+            # Index for source-scoped lookups (get_chunk_context, deletes).
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_file)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chunks_text ON chunks(text)")
-            
+            # A plain B-tree index on the full chunk text can't serve keyword
+            # search and only bloats the DB, so drop it if an older run created
+            # it. Use SQLite FTS5 if in-DB keyword search is ever needed.
+            cursor.execute("DROP INDEX IF EXISTS idx_chunks_text")
+
             conn.commit()
             self.logger.info("Database initialized successfully")
     
@@ -147,110 +163,107 @@ class DocumentProcessor:
             List of (text, page_number) tuples
         """
         pages_text = []
-        
-        # Try PyPDF2 first, fallback to pypdf
+
         try:
             with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                
+                pdf_reader = pypdf.PdfReader(file)
+
                 for page_num, page in enumerate(pdf_reader.pages, 1):
                     try:
                         text = page.extract_text()
-                        if text.strip():  # Only add non-empty pages
+                        if text and text.strip():  # Only add non-empty pages
                             pages_text.append((text, page_num))
                     except Exception as e:
                         self.logger.warning(f"Error extracting page {page_num} from {pdf_path}: {e}")
-                        
+
         except Exception as e:
-            self.logger.warning(f"PyPDF2 failed for {pdf_path}, trying pypdf: {e}")
-            
-            # Fallback to pypdf
-            try:
-                with open(pdf_path, 'rb') as file:
-                    pdf_reader = pypdf.PdfReader(file)
-                    
-                    for page_num, page in enumerate(pdf_reader.pages, 1):
-                        try:
-                            text = page.extract_text()
-                            if text.strip():
-                                pages_text.append((text, page_num))
-                        except Exception as e:
-                            self.logger.warning(f"Error extracting page {page_num} with pypdf: {e}")
-                            
-            except Exception as e:
-                self.logger.error(f"Both PDF extractors failed for {pdf_path}: {e}")
-        
+            self.logger.error(f"Failed to read PDF {pdf_path}: {e}")
+
         return pages_text
     
     def _clean_text(self, text: str) -> str:
-        """Clean and normalize extracted text."""
-        # Remove excessive whitespace
-        text = re.sub(r'\s+', ' ', text)
-        
-        # Remove page headers/footers patterns (common in technical docs)
-        text = re.sub(r'\n\d+\s*\n', '\n', text)  # Page numbers on separate lines
-        text = re.sub(r'\n[A-Z\s]{10,}\n', '\n', text)  # ALL CAPS headers
-        
-        # Clean up line breaks and spacing
-        text = re.sub(r'\n\s*\n', '\n\n', text)  # Normalize paragraph breaks
-        text = re.sub(r'(?<=[.!?])\s*\n(?=[A-Z])', ' ', text)  # Join broken sentences
-        
-        # Remove excessive punctuation
-        text = re.sub(r'[.]{3,}', '...', text)
-        text = re.sub(r'[-]{3,}', '---', text)
-        
+        """Clean and normalize extracted text.
+
+        Order matters: every newline-dependent rule (page-number removal,
+        header stripping, broken-sentence joining) must run *before* runs of
+        whitespace are collapsed, otherwise the leading ``\\s+`` collapse would
+        delete the newlines those rules rely on and they would never fire.
+        """
+        # Normalize line endings so the newline rules below behave predictably.
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+        # --- Newline-dependent rules (run first, while newlines still exist) ---
+        # Page numbers sitting alone on a line.
+        text = re.sub(r'\n\s*\d+\s*\n', '\n', text)
+        # ALL-CAPS header/footer lines (10+ chars of caps and spaces).
+        text = re.sub(r'\n[A-Z][A-Z ]{9,}\n', '\n', text)
+        # Join sentences broken across a line break.
+        text = re.sub(r'(?<=[.!?])\s*\n(?=[A-Z])', ' ', text)
+        # Collapse 3+ consecutive newlines into a single paragraph break.
+        text = re.sub(r'\n\s*\n(?:\s*\n)+', '\n\n', text)
+
+        # --- Collapse remaining horizontal whitespace (newlines preserved) ---
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r' *\n *', '\n', text)
+
+        # Remove excessive punctuation.
+        text = re.sub(r'\.{3,}', '...', text)
+        text = re.sub(r'-{3,}', '---', text)
+
         return text.strip()
     
-    def _create_chunks(self, text: str, source_file: str, page_number: int = None) -> List[str]:
+    def _chunk_sentences(self,
+                         sentences_with_pages: List[Tuple[str, int]]
+                         ) -> List[Tuple[str, int]]:
         """
-        Create overlapping chunks from text.
-        
+        Create overlapping chunks from a page-tagged sentence stream.
+
+        Chunks may span page boundaries (so a paragraph split across a page
+        break is kept together and the overlap window applies across pages).
+        Each sentence is tokenized exactly once.
+
         Args:
-            text: Input text to chunk
-            source_file: Source filename
-            page_number: Page number (optional)
-            
+            sentences_with_pages: List of (sentence, page_number) tuples in
+                document order.
+
         Returns:
-            List of text chunks
+            List of (chunk_text, page_number) tuples, where page_number is the
+            page the chunk starts on.
         """
-        # Split into sentences
-        sentences = sent_tokenize(text)
-        chunks = []
-        current_chunk = []
+        chunks: List[Tuple[str, int]] = []
+        # Each item is (sentence, page_number, word_count).
+        current: List[Tuple[str, int, int]] = []
         current_word_count = 0
-        
-        for sentence in sentences:
+
+        def finalize(items: List[Tuple[str, int, int]]) -> Tuple[str, int]:
+            return ' '.join(item[0] for item in items), items[0][1]
+
+        for sentence, page in sentences_with_pages:
             sentence_words = len(word_tokenize(sentence))
-            
-            # If adding this sentence would exceed chunk size, finalize current chunk
-            if current_word_count + sentence_words > self.chunk_size and current_chunk:
-                chunk_text = ' '.join(current_chunk)
-                chunks.append(chunk_text)
-                
-                # Start new chunk with overlap
+
+            # If adding this sentence would exceed chunk size, finalize current.
+            if current_word_count + sentence_words > self.chunk_size and current:
+                chunks.append(finalize(current))
+
+                # Start the next chunk with a trailing overlap window.
                 overlap_words = 0
-                overlap_sentences = []
-                
-                # Add sentences from the end for overlap
-                for i in range(len(current_chunk) - 1, -1, -1):
-                    sent_words = len(word_tokenize(current_chunk[i]))
-                    if overlap_words + sent_words <= self.chunk_overlap:
-                        overlap_sentences.insert(0, current_chunk[i])
-                        overlap_words += sent_words
+                overlap_items: List[Tuple[str, int, int]] = []
+                for item in reversed(current):
+                    if overlap_words + item[2] <= self.chunk_overlap:
+                        overlap_items.insert(0, item)
+                        overlap_words += item[2]
                     else:
                         break
-                
-                current_chunk = overlap_sentences + [sentence]
+
+                current = overlap_items + [(sentence, page, sentence_words)]
                 current_word_count = overlap_words + sentence_words
             else:
-                current_chunk.append(sentence)
+                current.append((sentence, page, sentence_words))
                 current_word_count += sentence_words
-        
-        # Add the last chunk if it has content
-        if current_chunk:
-            chunk_text = ' '.join(current_chunk)
-            chunks.append(chunk_text)
-        
+
+        if current:
+            chunks.append(finalize(current))
+
         return chunks
     
     def _find_source_metadata(self, filename: str) -> Tuple[str, str]:
@@ -263,24 +276,36 @@ class DocumentProcessor:
         Returns:
             Tuple of (title, url)
         """
+        # 1. Exact filename match — the only unambiguous signal. Requires a
+        #    ``filename`` field in sources.json (see README).
+        exact = self.sources_by_filename.get(filename.lower())
+        if exact:
+            return exact['title'], exact.get('url', '')
+
         filename_clean = filename.lower().replace('.pdf', '')
-        
-        # Try exact title matching first
+
+        # 2. Filename fully contained in a title.
         for title, metadata in self.sources_metadata.items():
             if filename_clean in title.lower():
                 return title, metadata.get('url', '')
-        
-        # Try partial matching
+
+        # 3. Fuzzy word-overlap fallback. This is unreliable with many
+        #    similar-sounding documents, so warn loudly when we rely on it.
+        #    Only consider distinctive words (length > 3) to avoid matching on
+        #    filler like "a"/"to"/"for", and require exact token overlap.
+        filename_words = set(filename_clean.replace('-', ' ').replace('_', ' ').split())
         for title, metadata in self.sources_metadata.items():
-            title_words = title.lower().split()
-            filename_words = filename_clean.replace('-', ' ').replace('_', ' ').split()
-            
-            # If filename contains key words from title
-            matches = sum(1 for word in title_words if any(word in fw for fw in filename_words))
-            if matches >= 2:  # At least 2 word matches
+            title_words = {w for w in title.lower().split() if len(w) > 3}
+
+            matches = len(title_words & filename_words)
+            if matches >= 2:  # At least 2 distinctive word matches
+                self.logger.warning(
+                    f"Fuzzy-matched {filename!r} to source {title!r} "
+                    f"(no explicit filename in sources.json) - citation may be wrong"
+                )
                 return title, metadata.get('url', '')
-        
-        # Fallback to filename as title
+
+        # 4. Give up: use the filename itself as the title.
         self.logger.warning(f"No metadata found for {filename}, using filename as title")
         return filename.replace('.pdf', '').replace('_', ' ').replace('-', ' '), ''
     
@@ -288,6 +313,24 @@ class DocumentProcessor:
         """Generate unique chunk ID."""
         content = f"{source_file}_{chunk_index}_{text[:50]}"
         return hashlib.md5(content.encode()).hexdigest()
+
+    def _compute_file_hash(self, pdf_path: str) -> str:
+        """Compute an MD5 hash of the file's bytes (for change detection)."""
+        hasher = hashlib.md5()
+        with open(pdf_path, 'rb') as f:
+            for block in iter(lambda: f.read(65536), b''):
+                hasher.update(block)
+        return hasher.hexdigest()
+
+    def _get_stored_file_hash(self, filename: str) -> Optional[str]:
+        """Return the file_hash recorded for a document, or None if unknown."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT file_hash FROM documents WHERE file_path = ?", (filename,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
     
     def process_document(self, pdf_path: str) -> List[DocumentChunk]:
         """
@@ -310,50 +353,60 @@ class DocumentProcessor:
         
         # Get source metadata
         source_title, source_url = self._find_source_metadata(filename)
-        
-        # Process each page and create chunks
-        all_chunks = []
-        chunk_index = 0
-        
+
+        # Build a flat, page-tagged sentence stream for the whole document so
+        # chunks can span page boundaries (see _chunk_sentences).
+        sentences_with_pages: List[Tuple[str, int]] = []
         for page_text, page_num in pages_text:
             cleaned_text = self._clean_text(page_text)
             if not cleaned_text:
                 continue
-            
-            # Create chunks for this page
-            page_chunks = self._create_chunks(cleaned_text, filename, page_num)
-            
-            for chunk_text in page_chunks:
-                if len(chunk_text.strip()) < 50:  # Skip very short chunks
-                    continue
-                
-                chunk_id = self._generate_chunk_id(chunk_text, filename, chunk_index)
-                word_count = len(word_tokenize(chunk_text))
-                char_count = len(chunk_text)
-                
-                chunk = DocumentChunk(
-                    chunk_id=chunk_id,
-                    text=chunk_text,
-                    source_title=source_title,
-                    source_url=source_url,
-                    source_file=filename,
-                    page_number=page_num,
-                    chunk_index=chunk_index,
-                    word_count=word_count,
-                    char_count=char_count
-                )
-                
-                all_chunks.append(chunk)
-                chunk_index += 1
-        
+            for sentence in sent_tokenize(cleaned_text):
+                sentences_with_pages.append((sentence, page_num))
+
+        # Create overlapping chunks.
+        all_chunks = []
+        chunk_index = 0
+        for chunk_text, page_num in self._chunk_sentences(sentences_with_pages):
+            if len(chunk_text.strip()) < 50:  # Skip very short chunks
+                continue
+
+            chunk_id = self._generate_chunk_id(chunk_text, filename, chunk_index)
+            chunk = DocumentChunk(
+                chunk_id=chunk_id,
+                text=chunk_text,
+                source_title=source_title,
+                source_url=source_url,
+                source_file=filename,
+                page_number=page_num,
+                chunk_index=chunk_index,
+                word_count=len(word_tokenize(chunk_text)),
+                char_count=len(chunk_text)
+            )
+            all_chunks.append(chunk)
+            chunk_index += 1
+
         self.logger.info(f"Created {len(all_chunks)} chunks from {filename}")
         return all_chunks
     
     def save_chunks(self, chunks: List[DocumentChunk]) -> None:
-        """Save chunks to database."""
+        """Save chunks to database.
+
+        Deletes any existing chunks for the source files present in this batch
+        first, so re-processing a document (whose extraction may yield
+        different chunk IDs) never leaves orphan rows behind.
+        """
+        if not chunks:
+            return
+
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
+
+            for source_file in {chunk.source_file for chunk in chunks}:
+                cursor.execute(
+                    "DELETE FROM chunks WHERE source_file = ?", (source_file,)
+                )
+
             for chunk in chunks:
                 cursor.execute("""
                     INSERT OR REPLACE INTO chunks 
@@ -368,51 +421,64 @@ class DocumentProcessor:
             
             conn.commit()
     
-    def process_all_documents(self) -> Dict[str, int]:
+    def process_all_documents(self, force_reprocess: bool = False) -> Dict[str, int]:
         """
         Process all PDF documents in the directory.
-        
+
+        Args:
+            force_reprocess: Re-process every file even if its content hash is
+                unchanged since the last run.
+
         Returns:
             Dictionary with processing statistics
         """
         pdf_files = [f for f in os.listdir(self.pdf_dir) if f.endswith('.pdf')]
         self.logger.info(f"Found {len(pdf_files)} PDF files to process")
-        
+
         stats = {
             'total_files': len(pdf_files),
             'processed_files': 0,
+            'skipped_files': 0,
             'total_chunks': 0,
             'failed_files': []
         }
-        
+
         for filename in tqdm(pdf_files, desc="Processing PDFs"):
             try:
                 pdf_path = os.path.join(self.pdf_dir, filename)
+                file_hash = self._compute_file_hash(pdf_path)
+
+                # Skip files whose bytes are unchanged since the last run.
+                if not force_reprocess and self._get_stored_file_hash(filename) == file_hash:
+                    self.logger.info(f"Skipping unchanged file: {filename}")
+                    stats['skipped_files'] += 1
+                    continue
+
                 chunks = self.process_document(pdf_path)
-                
+
                 if chunks:
                     self.save_chunks(chunks)
                     stats['processed_files'] += 1
                     stats['total_chunks'] += len(chunks)
-                    
-                    # Update documents table
+
+                    # Update documents table (now recording the content hash).
                     with sqlite3.connect(self.db_path) as conn:
                         cursor = conn.cursor()
                         source_title, source_url = self._find_source_metadata(filename)
                         cursor.execute("""
-                            INSERT OR REPLACE INTO documents 
-                            (file_path, source_title, source_url, total_chunks)
-                            VALUES (?, ?, ?, ?)
-                        """, (filename, source_title, source_url, len(chunks)))
+                            INSERT OR REPLACE INTO documents
+                            (file_path, source_title, source_url, total_chunks, file_hash)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (filename, source_title, source_url, len(chunks), file_hash))
                         conn.commit()
-                        
+
                 else:
                     stats['failed_files'].append(filename)
-                    
+
             except Exception as e:
                 self.logger.error(f"Error processing {filename}: {e}")
                 stats['failed_files'].append(filename)
-        
+
         self.logger.info(f"Processing complete: {stats}")
         return stats
     

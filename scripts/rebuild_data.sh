@@ -43,11 +43,12 @@ mkdir -p data
 
 # Remove existing data files
 echo "🧹 Cleaning existing data files..."
-rm -f data/rag_database.db data/faiss_index.bin data/chunk_id_map.pkl
+rm -f data/rag_database.db data/faiss_index.bin data/chunk_id_map.json \
+      data/chunk_id_map.pkl data/bm25_corpus.json
 
 # Step 1: Process documents and create database
 echo "📚 Step 1: Processing PDF documents..."
-python src/document_processor.py
+python -m rag_qa.document_processor
 
 # Check if database was created
 if [ ! -f "data/rag_database.db" ]; then
@@ -57,7 +58,7 @@ fi
 
 # Step 2: Build embeddings and FAISS index
 echo "🧠 Step 2: Building embeddings and search index..."
-python src/embedding_system.py
+python -m rag_qa.embedding_system
 
 # Check if index was created
 if [ ! -f "data/faiss_index.bin" ]; then
@@ -80,8 +81,8 @@ echo "  📁 Source files: $sources"
 # File sizes
 echo "  💾 Database size: $(du -sh data/rag_database.db | cut -f1)"
 echo "  🔍 Index size: $(du -sh data/faiss_index.bin | cut -f1)"
-echo "  🗂️  Mapping size: $(du -sh data/chunk_id_map.pkl | cut -f1)"
+echo "  🗂️  Mapping size: $(du -sh data/chunk_id_map.json | cut -f1)"
 
 echo ""
 echo "✅ Data rebuild complete!"
-echo "🚀 You can now start the API with: python src/api.py"
+echo "🚀 You can now start the API with: python -m rag_qa.api"

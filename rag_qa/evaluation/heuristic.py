@@ -4,17 +4,12 @@ Evaluation system for RAG Q&A performance comparison.
 Tests baseline vs hybrid reranker with comprehensive metrics.
 """
 
-import sys
-import os
 import json
 import time
 from typing import List, Dict, Any
 from dataclasses import dataclass
 
-# Add src to path
-sys.path.append('src')
-
-from api import QAService
+from rag_qa.api import QAService
 
 @dataclass
 class TestQuestion:
@@ -114,17 +109,22 @@ class RAGEvaluator:
         metrics['num_contexts'] = len(response.get('contexts', []))
         
         # Content relevance (simplified heuristic)
-        answer = response.get('answer', '').lower()
+        answer = (response.get('answer') or '').lower()
         contexts = response.get('contexts', [])
-        
-        # Check if expected source keywords appear
-        expected_matches = 0
-        for expected in question.expected_sources:
-            if any(expected.lower() in (answer + ' '.join([c.get('text', '') for c in contexts])).lower() 
-                   for expected in [expected]):
-                expected_matches += 1
-        
-        metrics['source_relevance'] = expected_matches / len(question.expected_sources) if question.expected_sources else 0.0
+
+        # Build the search haystack once (answer + all context text).
+        haystack = (answer + ' ' + ' '.join(c.get('text', '') for c in contexts)).lower()
+
+        # Count how many expected keywords appear anywhere in the haystack.
+        expected_matches = sum(
+            1 for expected in question.expected_sources
+            if expected.lower() in haystack
+        )
+
+        metrics['source_relevance'] = (
+            expected_matches / len(question.expected_sources)
+            if question.expected_sources else 0.0
+        )
         
         # Citation quality
         metrics['citation_count'] = len([c for c in contexts if c.get('url')])

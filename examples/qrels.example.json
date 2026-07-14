@@ -1,0 +1,19 @@
+[
+  {
+    "query": "What are the requirements for emergency stop systems?",
+    "relevant_files": ["osha3170.pdf", "safebk-rm002_-en-p.pdf"],
+    "note": "relevant_files must match the source_file values stored in the DB (see scripts/download_pdfs.py)."
+  },
+  {
+    "query": "How do you perform a risk assessment according to EN ISO 12100?",
+    "relevant_files": ["rep0217e.pdf", "sistema_cookbook1_end.pdf"]
+  },
+  {
+    "query": "Explain the difference between SIL and PL safety ratings",
+    "relevant_files": ["sil or pl, what is the difference.pdf"]
+  },
+  {
+    "query": "What machine guarding methods protect the point of operation?",
+    "relevant_files": ["osha3170.pdf", "toolsGuideMachineGuardOptions.pdf"]
+  }
+]

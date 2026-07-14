@@ -4,8 +4,9 @@ Handles vector generation, storage, and similarity search.
 """
 
 import os
+import json
+import hashlib
 import sqlite3
-import pickle
 import logging
 import numpy as np
 from typing import List, Dict, Tuple, Optional
@@ -13,7 +14,6 @@ from pathlib import Path
 
 import faiss
 from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
 
 class EmbeddingSystem:
     """Manages document embeddings and vector similarity search."""
@@ -22,7 +22,7 @@ class EmbeddingSystem:
                  model_name: str = "all-MiniLM-L6-v2",
                  db_path: str = "data/rag_database.db",
                  index_path: str = "data/faiss_index.bin",
-                 chunk_id_map_path: str = "data/chunk_id_map.pkl",
+                 chunk_id_map_path: str = "data/chunk_id_map.json",
                  batch_size: int = 32):
         """
         Initialize the embedding system.
@@ -54,7 +54,8 @@ class EmbeddingSystem:
         self.index = None
         self.chunk_id_map = {}  # Maps index position to chunk_id
         self.reverse_chunk_map = {}  # Maps chunk_id to index position
-        
+        self.corpus_fingerprint = None  # Fingerprint of the indexed corpus
+
         # Try to load existing index
         self._load_existing_index()
     
@@ -64,22 +65,52 @@ class EmbeddingSystem:
             try:
                 # Load FAISS index
                 self.index = faiss.read_index(self.index_path)
-                
-                # Load chunk mapping
-                with open(self.chunk_id_map_path, 'rb') as f:
-                    self.chunk_id_map = pickle.load(f)
-                
+
+                # Load chunk mapping (JSON: safe, human-readable). JSON object
+                # keys are strings, so cast positions back to int.
+                with open(self.chunk_id_map_path, 'r', encoding='utf-8') as f:
+                    payload = json.load(f)
+                raw_map = payload.get('chunk_id_map', {})
+                self.chunk_id_map = {int(idx): chunk_id for idx, chunk_id in raw_map.items()}
+                self.corpus_fingerprint = payload.get('fingerprint')
+
                 # Create reverse mapping
                 self.reverse_chunk_map = {chunk_id: idx for idx, chunk_id in self.chunk_id_map.items()}
-                
+
                 self.logger.info(f"Loaded existing index with {self.index.ntotal} vectors")
                 return True
-                
+
             except Exception as e:
                 self.logger.warning(f"Failed to load existing index: {e}")
                 return False
-        
+
         return False
+
+    def _compute_corpus_fingerprint(self, chunk_ids: Optional[List[str]] = None) -> str:
+        """
+        Compute a fingerprint of the corpus from its chunk IDs.
+
+        Because chunk IDs are content-derived (see DocumentProcessor), this
+        changes whenever any chunk's text, ordering, or membership changes.
+        Used to detect when the FAISS index has drifted from the database.
+        """
+        if chunk_ids is None:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT chunk_id FROM chunks ORDER BY chunk_id")
+                chunk_ids = [row[0] for row in cursor.fetchall()]
+
+        hasher = hashlib.sha256()
+        hasher.update(str(len(chunk_ids)).encode())
+        for chunk_id in sorted(chunk_ids):
+            hasher.update(chunk_id.encode())
+        return hasher.hexdigest()
+
+    def is_index_stale(self) -> bool:
+        """Return True if the loaded index no longer matches the database."""
+        if self.index is None or self.corpus_fingerprint is None:
+            return True
+        return self.corpus_fingerprint != self._compute_corpus_fingerprint()
     
     def _create_new_index(self) -> None:
         """Create a new FAISS index."""
@@ -102,32 +133,30 @@ class EmbeddingSystem:
             cursor.execute("SELECT chunk_id, text FROM chunks ORDER BY chunk_id")
             return cursor.fetchall()
     
-    def _normalize_embeddings(self, embeddings: np.ndarray) -> np.ndarray:
-        """Normalize embeddings for cosine similarity using inner product."""
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        # Avoid division by zero
-        norms = np.where(norms == 0, 1, norms)
-        return embeddings / norms
-    
-    def generate_embeddings(self, texts: List[str]) -> np.ndarray:
+    def generate_embeddings(self, texts: List[str],
+                            show_progress_bar: bool = False) -> np.ndarray:
         """
-        Generate embeddings for a list of texts.
-        
+        Generate L2-normalized embeddings for a list of texts.
+
+        Normalization is delegated to SentenceTransformer
+        (``normalize_embeddings=True``) so inner product equals cosine
+        similarity, matching the FAISS ``IndexFlatIP``.
+
         Args:
             texts: List of text strings
-            
+            show_progress_bar: Show a progress bar (off for single queries)
+
         Returns:
-            Normalized embeddings array
+            Normalized float32 embeddings array
         """
         embeddings = self.model.encode(
             texts,
             batch_size=self.batch_size,
-            show_progress_bar=True,
+            show_progress_bar=show_progress_bar,
             convert_to_numpy=True,
-            normalize_embeddings=False  # We'll normalize manually
+            normalize_embeddings=True
         )
-        
-        return self._normalize_embeddings(embeddings)
+        return embeddings.astype('float32')
     
     def build_index(self, force_rebuild: bool = False) -> Dict[str, int]:
         """
@@ -140,61 +169,64 @@ class EmbeddingSystem:
             Dictionary with build statistics
         """
         if self.index is not None and not force_rebuild:
-            self.logger.info("Index already exists. Use force_rebuild=True to rebuild.")
-            return {
-                'total_vectors': self.index.ntotal,
-                'embedding_dim': self.embedding_dim,
-                'status': 'existing'
-            }
-        
+            # An index exists — but only reuse it if it still matches the DB.
+            if self.is_index_stale():
+                self.logger.warning(
+                    "Existing index is stale (corpus fingerprint mismatch); "
+                    "rebuilding from the database."
+                )
+            else:
+                self.logger.info("Index already exists and matches the database.")
+                return {
+                    'total_vectors': self.index.ntotal,
+                    'embedding_dim': self.embedding_dim,
+                    'status': 'existing'
+                }
+
         # Get all chunks from database
         self.logger.info("Retrieving chunks from database...")
         chunks = self._get_chunks_from_db()
-        
+
         if not chunks:
             self.logger.error("No chunks found in database!")
             return {'error': 'No chunks found'}
-        
+
         self.logger.info(f"Found {len(chunks)} chunks to embed")
-        
+
         # Create new index
         self._create_new_index()
-        
+
         # Extract texts and chunk IDs
         chunk_ids = [chunk[0] for chunk in chunks]
         texts = [chunk[1] for chunk in chunks]
-        
-        # Generate embeddings in batches
+
+        # Generate all embeddings in one call — SentenceTransformer batches
+        # internally (batch_size), so there is no need to batch again here.
         self.logger.info("Generating embeddings...")
-        all_embeddings = []
-        
-        for i in tqdm(range(0, len(texts), self.batch_size), desc="Embedding batches"):
-            batch_texts = texts[i:i + self.batch_size]
-            batch_embeddings = self.generate_embeddings(batch_texts)
-            all_embeddings.append(batch_embeddings)
-        
-        # Combine all embeddings
-        embeddings_matrix = np.vstack(all_embeddings)
+        embeddings_matrix = self.generate_embeddings(texts, show_progress_bar=True)
         self.logger.info(f"Generated embeddings shape: {embeddings_matrix.shape}")
-        
+
         # Add to FAISS index
         self.logger.info("Adding embeddings to FAISS index...")
-        self.index.add(embeddings_matrix.astype('float32'))
-        
+        self.index.add(embeddings_matrix)
+
         # Update chunk mapping
         for i, chunk_id in enumerate(chunk_ids):
             self.chunk_id_map[i] = chunk_id
             self.reverse_chunk_map[chunk_id] = i
-        
+
+        # Record the fingerprint of exactly the corpus we just indexed.
+        self.corpus_fingerprint = self._compute_corpus_fingerprint(chunk_ids)
+
         # Save index and mapping
         self._save_index()
-        
+
         stats = {
             'total_vectors': self.index.ntotal,
             'embedding_dim': self.embedding_dim,
             'status': 'rebuilt'
         }
-        
+
         self.logger.info(f"Index build complete: {stats}")
         return stats
     
@@ -205,11 +237,17 @@ class EmbeddingSystem:
         
         # Save FAISS index
         faiss.write_index(self.index, self.index_path)
-        
-        # Save chunk mapping
-        with open(self.chunk_id_map_path, 'wb') as f:
-            pickle.dump(self.chunk_id_map, f)
-        
+
+        # Save chunk mapping + corpus fingerprint as JSON (no pickle: the map
+        # is just {position: chunk_id} and JSON carries no code-execution risk).
+        payload = {
+            'version': 1,
+            'fingerprint': self.corpus_fingerprint,
+            'chunk_id_map': {str(idx): chunk_id for idx, chunk_id in self.chunk_id_map.items()},
+        }
+        with open(self.chunk_id_map_path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f)
+
         self.logger.info(f"Saved index with {self.index.ntotal} vectors")
     
     def search_similar(self, 
@@ -236,32 +274,38 @@ class EmbeddingSystem:
         
         # Generate query embedding
         query_embedding = self.generate_embeddings([query])
-        
+
         # Search in FAISS index
-        scores, indices = self.index.search(query_embedding.astype('float32'), k)
-        
-        # Get results
-        results = []
-        for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
+        scores, indices = self.index.search(query_embedding, k)
+
+        # Resolve FAISS positions to chunk IDs, preserving rank order.
+        ranked = []  # (chunk_id, score)
+        for score, idx in zip(scores[0], indices[0]):
             if idx == -1:  # FAISS returns -1 for invalid results
                 continue
-            
-            chunk_id = self.chunk_id_map.get(idx)
+            chunk_id = self.chunk_id_map.get(int(idx))
             if chunk_id is None:
                 self.logger.warning(f"No chunk ID found for index {idx}")
                 continue
-            
-            # Get chunk details from database
-            chunk_info = self._get_chunk_details(chunk_id)
+            ranked.append((chunk_id, float(score)))
+
+        if not ranked:
+            return []
+
+        # Fetch all chunk details in a single query (avoids per-chunk N+1).
+        details = self._get_chunk_details_batch([chunk_id for chunk_id, _ in ranked])
+
+        results = []
+        for rank, (chunk_id, score) in enumerate(ranked, 1):
+            chunk_info = details.get(chunk_id)
             if chunk_info:
-                result = {
+                results.append({
                     'chunk_id': chunk_id,
-                    'similarity_score': float(score),
-                    'rank': i + 1,
+                    'similarity_score': score,
+                    'rank': rank,
                     **chunk_info
-                }
-                results.append(result)
-        
+                })
+
         return results
     
     def _get_chunk_details(self, chunk_id: str) -> Optional[Dict]:
@@ -290,22 +334,49 @@ class EmbeddingSystem:
                 }
         return None
     
+    def _get_chunk_details_batch(self, chunk_ids: List[str]) -> Dict[str, Dict]:
+        """Get full chunk details for many chunk IDs in a single query."""
+        if not chunk_ids:
+            return {}
+
+        placeholders = ','.join('?' * len(chunk_ids))
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                SELECT chunk_id, text, source_title, source_url, source_file,
+                       page_number, chunk_index, word_count, char_count
+                FROM chunks
+                WHERE chunk_id IN ({placeholders})
+            """, chunk_ids)
+            rows = cursor.fetchall()
+
+        return {
+            row[0]: {
+                'chunk_id': row[0],
+                'text': row[1],
+                'source_title': row[2],
+                'source_url': row[3],
+                'source_file': row[4],
+                'page_number': row[5],
+                'chunk_index': row[6],
+                'word_count': row[7],
+                'char_count': row[8],
+            }
+            for row in rows
+        }
+
     def search_by_chunk_ids(self, chunk_ids: List[str]) -> List[Dict]:
         """
         Retrieve full information for specific chunk IDs.
-        
+
         Args:
             chunk_ids: List of chunk IDs to retrieve
-            
+
         Returns:
-            List of chunk information dictionaries
+            List of chunk information dictionaries (order follows chunk_ids)
         """
-        results = []
-        for chunk_id in chunk_ids:
-            chunk_info = self._get_chunk_details(chunk_id)
-            if chunk_info:
-                results.append(chunk_info)
-        return results
+        details = self._get_chunk_details_batch(chunk_ids)
+        return [details[cid] for cid in chunk_ids if cid in details]
     
     def get_index_stats(self) -> Dict:
         """Get statistics about the index."""

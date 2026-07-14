@@ -8,7 +8,7 @@ import requests
 import json
 
 # API Configuration
-API_BASE = "http://localhost:8080"
+API_BASE = "http://localhost:9000"  # matches the default FLASK_PORT (override if you set FLASK_PORT)
 
 def ask_question(question, k=5, mode="hybrid"):
     """Ask a question to the RAG system."""

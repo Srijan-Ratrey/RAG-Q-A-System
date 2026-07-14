@@ -9,81 +9,116 @@ import json
 from typing import List, Dict, Optional, Tuple
 from dataclasses import asdict
 
+import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import sys
+from nltk.tokenize import sent_tokenize
 
-# Add src to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from rag_qa.search_system import SearchSystem, SearchResult
 
-from search_system import SearchSystem, SearchResult
+# Accepted search modes (shared by the /ask and /search endpoints).
+VALID_MODES = {"baseline", "hybrid", "rrf", "cross_encoder", "cross-encoder"}
 
 class AnswerGenerator:
     """Generates extractive answers from search results with citations."""
     
-    def __init__(self, confidence_threshold: float = 0.5):
+    def __init__(self,
+                 confidence_threshold: float = 0.5,
+                 embedding_system=None,
+                 num_source_chunks: int = 3,
+                 num_answer_sentences: int = 3,
+                 max_answer_chars: int = 400):
         """
         Initialize answer generator.
-        
+
         Args:
             confidence_threshold: Minimum confidence for providing an answer
+            embedding_system: EmbeddingSystem used to score sentences against
+                the query (enables query-aware extraction). If None, falls back
+                to leading-sentence extraction.
+            num_source_chunks: How many top chunks to draw candidate sentences from
+            num_answer_sentences: How many sentences to include in the answer
+            max_answer_chars: Hard cap on answer length
         """
         self.confidence_threshold = confidence_threshold
+        self.embedding_system = embedding_system
+        self.num_source_chunks = num_source_chunks
+        self.num_answer_sentences = num_answer_sentences
+        self.max_answer_chars = max_answer_chars
         self.logger = logging.getLogger(__name__)
-    
-    def extract_answer(self, 
-                      query: str, 
+
+    def extract_answer(self,
+                      query: str,
                       search_results: List[SearchResult]) -> Tuple[Optional[str], float, str]:
         """
         Extract an answer from search results.
-        
+
         Args:
             query: Original query
             search_results: List of search results
-            
+
         Returns:
             Tuple of (answer_text, confidence, reason)
         """
         if not search_results:
             return None, 0.0, "No relevant documents found"
-        
+
         # Get top result for answer extraction
         top_result = search_results[0]
-        
+
         # Check confidence threshold
         if top_result.confidence < self.confidence_threshold:
             return None, top_result.confidence, f"Low confidence score: {top_result.confidence:.3f}"
-        
-        # For extractive answering, we'll use the most relevant chunk
-        # In a more sophisticated system, we might use NLG models
-        answer_text = self._extract_relevant_sentences(query, top_result.text)
-        
-        return answer_text, top_result.confidence, "Answer extracted from top result"
-    
-    def _extract_relevant_sentences(self, query: str, text: str) -> str:
+
+        # Query-aware extraction over the top few chunks.
+        answer_text = self._extract_relevant_sentences(
+            query, search_results[:self.num_source_chunks]
+        )
+
+        return answer_text, top_result.confidence, "Answer extracted from top results"
+
+    def _candidate_sentences(self, results: List[SearchResult]) -> List[str]:
+        """Collect de-duplicated, reasonably-sized sentences from results."""
+        sentences, seen = [], set()
+        for result in results:
+            for sentence in sent_tokenize(result.text):
+                sentence = sentence.strip()
+                # Skip fragments (headers, stray tokens) and duplicates.
+                if len(sentence.split()) >= 4 and sentence not in seen:
+                    seen.add(sentence)
+                    sentences.append(sentence)
+        return sentences
+
+    def _extract_relevant_sentences(self, query: str, results: List[SearchResult]) -> str:
         """
-        Extract most relevant sentences from a chunk of text.
-        
-        Args:
-            query: Original query
-            text: Source text
-            
-        Returns:
-            Extracted answer text
+        Extract the sentences most relevant to the query.
+
+        Uses NLTK for sentence segmentation (handles "e.g.", decimals, and
+        standard references like "ISO 13849-1." that a naive ". " split would
+        break), and ranks sentences by cosine similarity to the query using the
+        already-loaded embedding model.
         """
-        # Simple extractive approach: return first few sentences or paragraph
-        sentences = text.split('. ')
-        
-        # Return first 2-3 sentences or up to 200 characters
-        if len(sentences) >= 2:
-            answer = '. '.join(sentences[:2]) + '.'
+        sentences = self._candidate_sentences(results)
+        if not sentences:
+            return results[0].text[:self.max_answer_chars].strip()
+
+        n = self.num_answer_sentences
+        if self.embedding_system is None or len(sentences) <= n:
+            selected_idx = list(range(min(n, len(sentences))))
         else:
-            answer = text
-        
-        # Truncate if too long
-        if len(answer) > 300:
-            answer = answer[:297] + "..."
-        
+            query_emb = self.embedding_system.generate_embeddings([query])[0]
+            sent_emb = self.embedding_system.generate_embeddings(sentences)
+            # Embeddings are L2-normalized, so the dot product is cosine sim.
+            sims = sent_emb @ query_emb
+            top_idx = np.argsort(-sims)[:n]
+            # Preserve original reading order for a coherent answer.
+            selected_idx = sorted(int(i) for i in top_idx)
+
+        answer = ' '.join(sentences[i] for i in selected_idx)
+
+        if len(answer) > self.max_answer_chars:
+            answer = answer[:self.max_answer_chars - 3].rstrip() + "..."
+
         return answer.strip()
 
 class QAService:
@@ -100,7 +135,10 @@ class QAService:
             confidence_threshold: Minimum confidence for answers
         """
         self.search_system = SearchSystem(db_path=db_path)
-        self.answer_generator = AnswerGenerator(confidence_threshold=confidence_threshold)
+        self.answer_generator = AnswerGenerator(
+            confidence_threshold=confidence_threshold,
+            embedding_system=self.search_system.embedding_system,
+        )
         self.logger = logging.getLogger(__name__)
     
     def ask(self, 
@@ -130,7 +168,7 @@ class QAService:
             for result in search_results:
                 context = {
                     "text": result.text,
-                    "score": result.hybrid_score if mode == "hybrid" else result.vector_score,
+                    "score": result.vector_score if mode == "baseline" else result.hybrid_score,
                     "source": result.source_title,
                     "url": result.source_url if result.source_url else "",
                     "file": result.source_file,
@@ -154,13 +192,14 @@ class QAService:
             return response
             
         except Exception as e:
-            self.logger.error(f"Error processing query '{query}': {e}")
+            # Log the detail server-side; return a generic reason to the client.
+            self.logger.exception(f"Error processing query '{query}': {e}")
             return {
                 "answer": None,
                 "contexts": [],
                 "reranker_used": mode,
                 "confidence": 0.0,
-                "abstain_reason": f"System error: {str(e)}",
+                "abstain_reason": "System error while processing the query",
                 "query": query,
                 "total_results": 0
             }
@@ -175,16 +214,24 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# Initialize QA service (will be done on first request to handle startup time)
+# Initialize QA service. Guarded by a lock so concurrent first-requests don't
+# race to build two services (each of which loads the model). Prefer calling
+# init_qa_service() at startup to avoid a first-request latency spike.
+import threading
+
 qa_service = None
+_qa_service_lock = threading.Lock()
 
 def get_qa_service():
-    """Get or initialize QA service."""
+    """Get or initialize the QA service (thread-safe, lazy)."""
     global qa_service
     if qa_service is None:
-        # Get database path relative to project root
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "rag_database.db")
-        qa_service = QAService(db_path=db_path)
+        with _qa_service_lock:
+            if qa_service is None:  # double-checked under the lock
+                db_path = os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)), "data", "rag_database.db"
+                )
+                qa_service = QAService(db_path=db_path)
     return qa_service
 
 @app.route('/health', methods=['GET'])
@@ -218,7 +265,9 @@ def ask_question():
     """
     try:
         # Parse request
-        data = request.get_json()
+        # silent=True -> return None instead of raising 415 when the body is
+        # missing or not JSON, so we can respond with a clean 400.
+        data = request.get_json(silent=True)
         
         if not data:
             return jsonify({
@@ -236,28 +285,26 @@ def ask_question():
                 "error": "Query parameter 'q' is required and cannot be empty"
             }), 400
         
-        if not isinstance(k, int) or k < 1 or k > 20:
+        if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > 20:
             return jsonify({
                 "error": "Parameter 'k' must be an integer between 1 and 20"
             }), 400
         
-        if mode not in ['baseline', 'hybrid']:
+        if mode not in VALID_MODES:
             return jsonify({
-                "error": "Parameter 'mode' must be 'baseline' or 'hybrid'"
+                "error": f"Parameter 'mode' must be one of: {', '.join(sorted(VALID_MODES))}"
             }), 400
-        
+
         # Process query
         qa_service = get_qa_service()
         response = qa_service.ask(query, k=k, mode=mode)
-        
+
         return jsonify(response)
-        
+
     except Exception as e:
-        app.logger.error(f"Error in /ask endpoint: {e}")
-        return jsonify({
-            "error": "Internal server error",
-            "message": str(e)
-        }), 500
+        # Log detail server-side; do not leak internals to the client.
+        app.logger.exception(f"Error in /ask endpoint: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/search', methods=['POST'])
 def search_documents():
@@ -272,7 +319,9 @@ def search_documents():
     }
     """
     try:
-        data = request.get_json()
+        # silent=True -> return None instead of raising 415 when the body is
+        # missing or not JSON, so we can respond with a clean 400.
+        data = request.get_json(silent=True)
         
         if not data:
             return jsonify({"error": "Invalid JSON in request body"}), 400
@@ -280,10 +329,20 @@ def search_documents():
         query = data.get('q', '').strip()
         k = data.get('k', 10)
         mode = data.get('mode', 'hybrid').lower()
-        
+
         if not query:
             return jsonify({"error": "Query parameter 'q' is required"}), 400
-        
+
+        if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > 20:
+            return jsonify({
+                "error": "Parameter 'k' must be an integer between 1 and 20"
+            }), 400
+
+        if mode not in VALID_MODES:
+            return jsonify({
+                "error": f"Parameter 'mode' must be one of: {', '.join(sorted(VALID_MODES))}"
+            }), 400
+
         qa_service = get_qa_service()
         search_results = qa_service.search_system.search(query, k=k, mode=mode)
         
@@ -377,16 +436,27 @@ def home():
     })
 
 def main():
-    """Run the Flask application."""
-    # Configuration
-    host = os.getenv('FLASK_HOST', '0.0.0.0')
+    """Run the Flask application (development server)."""
+    # Safe defaults: bind to loopback and keep the debugger OFF. Werkzeug's
+    # interactive debugger allows remote code execution, so it must never be
+    # on by default — least of all bound to 0.0.0.0. Opt in explicitly for a
+    # trusted local session only.
+    host = os.getenv('FLASK_HOST', '127.0.0.1')
     port = int(os.getenv('FLASK_PORT', 9000))
-    debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
-    
+    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+
     print(f"🚀 Starting RAG Q&A API on {host}:{port}")
     print(f"📚 Using database: {os.path.join('data', 'rag_database.db')}")
     print(f"🔍 Available endpoints: /health, /ask, /search, /stats")
-    
+    print("ℹ️  Development server. For production run behind gunicorn, e.g.:")
+    print("    gunicorn --chdir src --workers 2 'api:app'")
+
+    # Initialize eagerly so the model load happens now, not on first request.
+    try:
+        get_qa_service()
+    except Exception as e:  # pragma: no cover - startup diagnostics
+        app.logger.warning(f"Deferred QA service init (will retry on request): {e}")
+
     app.run(host=host, port=port, debug=debug)
 
 if __name__ == "__main__":
