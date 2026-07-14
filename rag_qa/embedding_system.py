@@ -10,7 +10,6 @@ import sqlite3
 import logging
 import numpy as np
 from typing import List, Dict, Tuple, Optional
-from pathlib import Path
 
 import faiss
 from sentence_transformers import SentenceTransformer

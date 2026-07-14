@@ -5,9 +5,7 @@ Provides endpoint for question answering with grounded answers and citations.
 
 import os
 import logging
-import json
 from typing import List, Dict, Optional, Tuple
-from dataclasses import asdict
 
 import numpy as np
 from flask import Flask, request, jsonify

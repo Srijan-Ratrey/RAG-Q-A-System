@@ -8,7 +8,7 @@ import json
 import sqlite3
 import logging
 import re
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 import numpy as np
 

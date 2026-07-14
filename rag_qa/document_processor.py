@@ -11,7 +11,6 @@ import hashlib
 import logging
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
-from pathlib import Path
 
 import pypdf
 import nltk
