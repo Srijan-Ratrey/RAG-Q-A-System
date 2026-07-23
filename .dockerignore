@@ -1,0 +1,12 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.pytest_cache/
+industrial-safety-pdfs/
+data/*.db
+data/*.bin
+data/*.json
+*.log
+.DS_Store

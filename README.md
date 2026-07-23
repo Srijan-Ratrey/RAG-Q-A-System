@@ -49,30 +49,50 @@ This project implements a retrieval-augmented generation (RAG) system specifical
    source venv/bin/activate  # On Windows: venv\\Scripts\\activate
    ```
 
-3. **Install dependencies**:
+3. **Install the package** (editable, pulls in dependencies):
    ```bash
-   pip install -r requirements.txt
+   pip install -e .
+   # or: pip install -r requirements.txt
    ```
 
 4. **Verify setup**:
    ```bash
-   python verify_setup.py
+   python scripts/verify_setup.py
    ```
 
 ## 📁 Project Structure
 
 ```
-RAG/
-├── src/                          # Source code
-├── tests/                        # Test files
-├── data/                         # Processed data and database
-├── logs/                         # Application logs
-├── industrial-safety-pdfs/      # Source PDF files (20 documents)
-├── sources.json                  # Citation metadata
-├── requirements.txt              # Python dependencies
-├── verify_setup.py              # Setup verification script
-└── README.md                    # This file
+RAG-Q-A-System/
+├── rag_qa/                       # Importable package
+│   ├── document_processor.py     # PDF extraction, cleaning, chunking
+│   ├── embedding_system.py       # Embeddings + FAISS index (+ fingerprint)
+│   ├── search_system.py          # baseline / hybrid / rrf / cross_encoder
+│   ├── api.py                    # Flask API + extractive answering
+│   └── evaluation/
+│       ├── metrics.py            # Recall@k / MRR / nDCG (pure functions)
+│       ├── ir.py                 # IR evaluation driver (labeled qrels)
+│       └── heuristic.py          # Baseline↔hybrid heuristic comparison
+├── tests/                        # pytest suite (unit + one integration test)
+├── scripts/
+│   ├── rebuild_data.sh           # Rebuild DB + indices from PDFs
+│   ├── download_pdfs.py          # Fetch source PDFs; records filenames
+│   └── verify_setup.py           # Setup verification script
+├── examples/
+│   ├── example_usage.py          # Sample API client
+│   └── qrels.example.json        # Relevance labels template for IR eval
+├── data/                         # Built artifacts (gitignored): DB, index, maps
+├── industrial-safety-pdfs/       # Source PDFs (not committed; see download_pdfs.py)
+├── sources.json                  # Citation metadata (title, url, filename)
+├── pyproject.toml                # Package metadata, console scripts, pytest config
+├── requirements.txt
+├── Dockerfile                    # Production image (gunicorn)
+└── README.md
 ```
+
+Installed as a package (`pip install -e .`), so modules import as
+`rag_qa.search_system` etc. — no `sys.path` hacks. Console scripts:
+`rag-api`, `rag-eval`, `rag-ir-eval`.
 
 ## 🔧 Implementation Status
 
@@ -169,47 +189,51 @@ Metrics:
 ## 📚 Dependencies
 
 ### Core ML Libraries
-- `sentence-transformers>=2.3.1` - Embedding generation
+- `sentence-transformers>=2.3.1` - Embeddings + optional cross-encoder reranker
 - `faiss-cpu>=1.7.4` - Vector similarity search
-- `transformers>=4.30.2` - HuggingFace ecosystem
-- `scikit-learn==1.3.0` - ML utilities
-- `rank-bm25==0.2.2` - Keyword scoring
+- `transformers>=4.30.2` - HuggingFace ecosystem (pulled in transitively)
+- `rank-bm25>=0.2.2` - BM25 keyword scoring
 
 ### Document Processing
-- `PyPDF2==3.0.1` - PDF text extraction
-- `pypdf==3.14.0` - Alternative PDF processing
-- `nltk==3.8.1` - Text processing
+- `pypdf>=3.14.0` - PDF text extraction (replaces the deprecated PyPDF2)
+- `nltk>=3.8.1` - Sentence/word tokenization (needs `punkt`, `punkt_tab`, `stopwords`)
 
 ### Web Framework
-- `flask==2.3.2` - API framework
-- `flask-cors==4.0.0` - CORS support
+- `flask>=3.0.0` / `flask-cors>=4.0.0` - API + CORS
+- `gunicorn>=21.2.0` - Production WSGI server
 
 ### Database & Utilities
 - `sqlite3` (built-in) - Local database
-- `sqlalchemy==2.0.19` - Database ORM
-- `numpy`, `pandas` - Data manipulation
+- `numpy` - Vector math
+- `pytest` - Tests
 
-## 📊 Evaluation Results
+Pins are loosened to ranges so the project installs on modern Python
+(`numpy>=1.26` is required for Python 3.12+).
 
-Our comprehensive evaluation with 8 test questions across different categories shows:
+## 📊 Evaluation
 
-### **Key Performance Metrics**
-- **Answer Rate**: 100% (both baseline and hybrid)
-- **Confidence Improvement**: +5.9% average (0.745 → 0.804)
-- **Reranking Activity**: 87.5% of queries had ranking changes
-- **Response Time**: Hybrid is ~9x faster (0.196s → 0.022s avg)
+Two evaluation entry points:
 
-### **Per-Category Improvements**
-- **Machine Guarding**: +6.9% confidence improvement
-- **Safety Ratings**: +5.1% confidence improvement  
-- **LOTO Procedures**: +7.9% confidence improvement
-- **Risk Assessment**: +1.9% confidence improvement
+- **`rag-ir-eval` (recommended)** — proper retrieval metrics
+  (**Recall@k, MRR, nDCG@k**) against labeled query→relevant-file judgements,
+  with **warmup-corrected latency** per mode. This is the honest way to compare
+  baseline vs hybrid vs RRF vs cross-encoder.
+  ```bash
+  cp examples/qrels.example.json qrels.json          # then fill in labels
+  python -m rag_qa.evaluation.ir --k 5               # or: rag-ir-eval --k 5
+  #                                                  # add --cross-encoder to include it
+  ```
+- **`rag-eval` (`rag_qa.evaluation.heuristic`)** — the original heuristic comparison (answer rate,
+  confidence deltas, ranking churn). Useful as a smoke test, but its
+  "confidence improvement" is **not** a retrieval-quality metric: hybrid mode's
+  score mixes a per-query-normalized BM25 term, so absolute confidence values
+  aren't comparable across queries. Prefer `rag-ir-eval` for real numbers.
 
-### **Key Findings**
-✅ **Hybrid reranker consistently improves confidence scores**  
-✅ **High reranking activity shows BM25 adds value**  
-✅ **All test questions answered successfully**  
-✅ **Faster response times with hybrid approach**
+> ⚠️ Earlier revisions of this README quoted specific gains (e.g. "+5.9%
+> confidence", "~9x faster"). Those came from the heuristic script and, for
+> latency, did not exclude first-call warmup — hybrid does strictly more work
+> than baseline, so it is at best comparable, not faster. Re-run
+> `rag-ir-eval` on your own corpus and labels for trustworthy figures.
 
 ## 🎓 Learning Objectives
 
@@ -233,35 +257,42 @@ pip install -r requirements.txt
 
 ### 2. Build Data (First Time Setup)
 ```bash
-# Download NLTK data
-python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+# Download NLTK data (punkt_tab is required on NLTK >= 3.8.2)
+python -c "import nltk; [nltk.download(r) for r in ('punkt','punkt_tab','stopwords')]"
+
+# Fetch the source PDFs (writes into industrial-safety-pdfs/ and records each
+# file's name back into sources.json for exact citation matching)
+python scripts/download_pdfs.py
 
 # Option A: Use rebuild script (recommended)
 ./scripts/rebuild_data.sh
 
 # Option B: Manual setup
-python src/document_processor.py
-python src/embedding_system.py
+python -m rag_qa.document_processor
+python -m rag_qa.embedding_system
 ```
+
+> The PDFs and built artifacts (`data/*.db`, `*.bin`, `*.json`) are gitignored,
+> so this step is required before the API can answer questions.
 
 ### 3. Start the API Server
 ```bash
-python src/api.py
-# If port 5000 is in use: FLASK_PORT=8080 python src/api.py
+python -m rag_qa.api          # or: rag-api
+# If port 9000 is in use: FLASK_PORT=8080 python -m rag_qa.api
 ```
 
 ### 4. Test with Working cURL Examples
 
 **Easy Question Example (General Safety):**
 ```bash
-curl -X POST http://localhost:5000/ask \
+curl -X POST http://localhost:9000/ask \
   -H "Content-Type: application/json" \
   -d '{"q": "What are machine safety requirements?", "k": 5, "mode": "hybrid"}'
 ```
 
 **Tricky Question Example (Technical Calculation):**
 ```bash
-curl -X POST http://localhost:5000/ask \
+curl -X POST http://localhost:9000/ask \
   -H "Content-Type: application/json" \
   -d '{"q": "How do you calculate Performance Level PLr for safety functions?", "k": 3, "mode": "baseline"}'
 ```
@@ -274,8 +305,37 @@ Both examples return JSON responses with:
 
 ### 5. Run Full Evaluation
 ```bash
-python evaluation.py
+python -m rag_qa.evaluation.ir --k 5     # rank metrics (needs qrels.json)
+python -m rag_qa.evaluation.heuristic    # heuristic smoke test
 ```
+
+### 6. Run the Tests
+```bash
+pytest                                              # full suite
+pytest --ignore=tests/test_embedding_integration.py # skip the model-download test
+```
+
+### 7. Run with Docker (production-style)
+```bash
+docker build -t rag-qa .
+# Mount a prebuilt data/ directory so the container has the DB + index:
+docker run --rm -p 9000:9000 -v "$PWD/data:/app/data" rag-qa
+```
+
+## 🔎 Search Modes
+
+`mode` accepts:
+
+| mode | what it does |
+|------|--------------|
+| `baseline` | Pure vector cosine similarity |
+| `hybrid` | 70% vector + 30% BM25 (default) |
+| `rrf` | Reciprocal Rank Fusion of vector + BM25 ranks (no score normalization) |
+| `cross_encoder` | Reranks candidates with a cross-encoder (best quality; loads an extra model, falls back to hybrid if unavailable) |
+
+`confidence` is the top result's cosine similarity for all cosine-based modes
+(comparable across queries); for `cross_encoder` it is the sigmoid of the
+cross-encoder score.
 
 ## 🎓 What I Learned
 
@@ -299,5 +359,6 @@ python evaluation.py
 
 ---
 
-**Status**: ✅ Complete  
-**Final Statistics**: 3,084 chunks | 20 documents | 8/8 test questions answered | +5.9% confidence improvement
+**Status**: ✅ Working — pipeline, hybrid/RRF/cross-encoder retrieval, API, tests, and IR evaluation all in place.
+**Corpus**: 20 source documents (chunk count depends on your extraction run).
+**Metrics**: run `rag-ir-eval` against your own `qrels.json` for trustworthy Recall@k / MRR / nDCG figures.

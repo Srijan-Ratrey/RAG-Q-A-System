@@ -53,10 +53,20 @@ Thumbs.db
 logs/
 *.log
 
+# Packaging build artifacts
+*.egg-info/
+build/
+dist/
+qrels.json
+ir_evaluation_report.json
+evaluation_report.json
+
 # Data files (keep structure but not content for demo)
 data/rag_database.db
 data/faiss_index.bin
+data/chunk_id_map.json
 data/chunk_id_map.pkl
+data/bm25_corpus.json
 
 # Model cache
 .cache/
