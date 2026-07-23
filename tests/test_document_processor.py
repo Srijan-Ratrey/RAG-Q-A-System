@@ -50,6 +50,21 @@ def test_chunking_produces_overlap(processor):
     assert overlapping, "expected at least one sentence shared across chunks"
 
 
+def test_chunking_splits_periodless_oversized_sentence(processor):
+    # Documents with little sentence punctuation (resumes, tables, slide
+    # exports) can tokenize into one enormous "sentence". Without word-level
+    # splitting this collapsed into a single giant chunk whose averaged
+    # embedding matched no specific query. chunk_size=40, so a ~120-word
+    # punctuation-free run must break into multiple chunks.
+    big = " ".join(f"word{i}" for i in range(120))  # no sentence terminators
+    chunks = processor._chunk_sentences([(big, 1)])
+    assert len(chunks) >= 2
+    # Every chunk must respect the word-count target (allowing overlap slack).
+    assert all(len(text.split()) <= processor.chunk_size * 2 for text, _ in chunks)
+    # No content is lost in the split.
+    assert "word0" in chunks[0][0] and "word119" in chunks[-1][0]
+
+
 def test_chunking_spans_page_boundaries(processor):
     # Sentences from two pages; a chunk should be allowed to include both.
     sentences = [("Sentence one on the first page here.", 1),

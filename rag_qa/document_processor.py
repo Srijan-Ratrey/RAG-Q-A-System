@@ -9,7 +9,7 @@ import json
 import sqlite3
 import hashlib
 import logging
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Iterator
 from dataclasses import dataclass
 
 import pypdf
@@ -237,7 +237,7 @@ class DocumentProcessor:
         def finalize(items: List[Tuple[str, int, int]]) -> Tuple[str, int]:
             return ' '.join(item[0] for item in items), items[0][1]
 
-        for sentence, page in sentences_with_pages:
+        for sentence, page in self._split_oversized_sentences(sentences_with_pages):
             sentence_words = len(word_tokenize(sentence))
 
             # If adding this sentence would exceed chunk size, finalize current.
@@ -264,7 +264,28 @@ class DocumentProcessor:
             chunks.append(finalize(current))
 
         return chunks
-    
+
+    def _split_oversized_sentences(self,
+                                   sentences_with_pages: List[Tuple[str, int]]
+                                   ) -> Iterator[Tuple[str, int]]:
+        """Break any single sentence longer than ``chunk_size`` into word-bounded
+        pieces so the chunker still splits it.
+
+        Sentence-based chunking assumes real sentence punctuation. Documents
+        with little of it — resumes, tables, slide exports — can tokenize into
+        one enormous "sentence" that would otherwise become a single giant
+        chunk, whose averaged embedding matches no specific query well. Splitting
+        such sentences on word boundaries keeps them as several embeddable units;
+        normal prose (sentences <= chunk_size) passes through unchanged.
+        """
+        for sentence, page in sentences_with_pages:
+            words = sentence.split()
+            if len(words) <= self.chunk_size:
+                yield sentence, page
+                continue
+            for i in range(0, len(words), self.chunk_size):
+                yield ' '.join(words[i:i + self.chunk_size]), page
+
     def _find_source_metadata(self, filename: str) -> Tuple[str, str]:
         """
         Find source title and URL for a given filename.
