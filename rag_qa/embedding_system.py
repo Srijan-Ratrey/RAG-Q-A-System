@@ -14,16 +14,19 @@ from typing import List, Dict, Tuple, Optional
 import faiss
 from sentence_transformers import SentenceTransformer
 
+
 class EmbeddingSystem:
     """Manages document embeddings and vector similarity search."""
-    
-    def __init__(self,
-                 model_name: str = "all-MiniLM-L6-v2",
-                 db_path: str = "data/rag_database.db",
-                 index_path: str = "data/faiss_index.bin",
-                 chunk_id_map_path: str = "data/chunk_id_map.json",
-                 batch_size: int = 32,
-                 model=None):
+
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        db_path: str = "data/rag_database.db",
+        index_path: str = "data/faiss_index.bin",
+        chunk_id_map_path: str = "data/chunk_id_map.json",
+        batch_size: int = 32,
+        model=None,
+    ):
         """
         Initialize the embedding system.
 
@@ -55,7 +58,7 @@ class EmbeddingSystem:
             self.model = SentenceTransformer(model_name)
         self.embedding_dim = self.model.get_sentence_embedding_dimension()
         self.logger.info(f"Model ready. Embedding dimension: {self.embedding_dim}")
-        
+
         # Initialize FAISS index and chunk mapping
         self.index = None
         self.chunk_id_map = {}  # Maps index position to chunk_id
@@ -64,7 +67,7 @@ class EmbeddingSystem:
 
         # Try to load existing index
         self._load_existing_index()
-    
+
     def _load_existing_index(self) -> bool:
         """Load existing FAISS index and chunk mapping if available."""
         if os.path.exists(self.index_path) and os.path.exists(self.chunk_id_map_path):
@@ -74,16 +77,22 @@ class EmbeddingSystem:
 
                 # Load chunk mapping (JSON: safe, human-readable). JSON object
                 # keys are strings, so cast positions back to int.
-                with open(self.chunk_id_map_path, 'r', encoding='utf-8') as f:
+                with open(self.chunk_id_map_path, "r", encoding="utf-8") as f:
                     payload = json.load(f)
-                raw_map = payload.get('chunk_id_map', {})
-                self.chunk_id_map = {int(idx): chunk_id for idx, chunk_id in raw_map.items()}
-                self.corpus_fingerprint = payload.get('fingerprint')
+                raw_map = payload.get("chunk_id_map", {})
+                self.chunk_id_map = {
+                    int(idx): chunk_id for idx, chunk_id in raw_map.items()
+                }
+                self.corpus_fingerprint = payload.get("fingerprint")
 
                 # Create reverse mapping
-                self.reverse_chunk_map = {chunk_id: idx for idx, chunk_id in self.chunk_id_map.items()}
+                self.reverse_chunk_map = {
+                    chunk_id: idx for idx, chunk_id in self.chunk_id_map.items()
+                }
 
-                self.logger.info(f"Loaded existing index with {self.index.ntotal} vectors")
+                self.logger.info(
+                    f"Loaded existing index with {self.index.ntotal} vectors"
+                )
                 return True
 
             except Exception as e:
@@ -117,7 +126,7 @@ class EmbeddingSystem:
         if self.index is None or self.corpus_fingerprint is None:
             return True
         return self.corpus_fingerprint != self._compute_corpus_fingerprint()
-    
+
     def _create_new_index(self) -> None:
         """Create a new FAISS index."""
         # Use Inner Product (IP) similarity for cosine similarity
@@ -126,11 +135,11 @@ class EmbeddingSystem:
         self.chunk_id_map = {}
         self.reverse_chunk_map = {}
         self.logger.info(f"Created new FAISS index with dimension {self.embedding_dim}")
-    
+
     def _get_chunks_from_db(self) -> List[Tuple[str, str]]:
         """
         Retrieve all chunks from database.
-        
+
         Returns:
             List of (chunk_id, text) tuples
         """
@@ -138,9 +147,10 @@ class EmbeddingSystem:
             cursor = conn.cursor()
             cursor.execute("SELECT chunk_id, text FROM chunks ORDER BY chunk_id")
             return cursor.fetchall()
-    
-    def generate_embeddings(self, texts: List[str],
-                            show_progress_bar: bool = False) -> np.ndarray:
+
+    def generate_embeddings(
+        self, texts: List[str], show_progress_bar: bool = False
+    ) -> np.ndarray:
         """
         Generate L2-normalized embeddings for a list of texts.
 
@@ -160,17 +170,17 @@ class EmbeddingSystem:
             batch_size=self.batch_size,
             show_progress_bar=show_progress_bar,
             convert_to_numpy=True,
-            normalize_embeddings=True
+            normalize_embeddings=True,
         )
-        return embeddings.astype('float32')
-    
+        return embeddings.astype("float32")
+
     def build_index(self, force_rebuild: bool = False) -> Dict[str, int]:
         """
         Build or rebuild the FAISS index from all chunks in database.
-        
+
         Args:
             force_rebuild: Whether to rebuild even if index exists
-            
+
         Returns:
             Dictionary with build statistics
         """
@@ -184,9 +194,9 @@ class EmbeddingSystem:
             else:
                 self.logger.info("Index already exists and matches the database.")
                 return {
-                    'total_vectors': self.index.ntotal,
-                    'embedding_dim': self.embedding_dim,
-                    'status': 'existing'
+                    "total_vectors": self.index.ntotal,
+                    "embedding_dim": self.embedding_dim,
+                    "status": "existing",
                 }
 
         # Get all chunks from database
@@ -195,7 +205,7 @@ class EmbeddingSystem:
 
         if not chunks:
             self.logger.error("No chunks found in database!")
-            return {'error': 'No chunks found'}
+            return {"error": "No chunks found"}
 
         self.logger.info(f"Found {len(chunks)} chunks to embed")
 
@@ -228,56 +238,57 @@ class EmbeddingSystem:
         self._save_index()
 
         stats = {
-            'total_vectors': self.index.ntotal,
-            'embedding_dim': self.embedding_dim,
-            'status': 'rebuilt'
+            "total_vectors": self.index.ntotal,
+            "embedding_dim": self.embedding_dim,
+            "status": "rebuilt",
         }
 
         self.logger.info(f"Index build complete: {stats}")
         return stats
-    
+
     def _save_index(self) -> None:
         """Save FAISS index and chunk mapping to disk."""
         # Ensure directory exists
         os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
-        
+
         # Save FAISS index
         faiss.write_index(self.index, self.index_path)
 
         # Save chunk mapping + corpus fingerprint as JSON (no pickle: the map
         # is just {position: chunk_id} and JSON carries no code-execution risk).
         payload = {
-            'version': 1,
-            'fingerprint': self.corpus_fingerprint,
-            'chunk_id_map': {str(idx): chunk_id for idx, chunk_id in self.chunk_id_map.items()},
+            "version": 1,
+            "fingerprint": self.corpus_fingerprint,
+            "chunk_id_map": {
+                str(idx): chunk_id for idx, chunk_id in self.chunk_id_map.items()
+            },
         }
-        with open(self.chunk_id_map_path, 'w', encoding='utf-8') as f:
+        with open(self.chunk_id_map_path, "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
         self.logger.info(f"Saved index with {self.index.ntotal} vectors")
-    
-    def search_similar(self, 
-                      query: str, 
-                      k: int = 5, 
-                      return_scores: bool = True) -> List[Dict]:
+
+    def search_similar(
+        self, query: str, k: int = 5, return_scores: bool = True
+    ) -> List[Dict]:
         """
         Search for similar chunks using vector similarity.
-        
+
         Args:
             query: Query string
             k: Number of results to return
             return_scores: Whether to include similarity scores
-            
+
         Returns:
             List of result dictionaries with chunk information
         """
         if self.index is None:
             raise ValueError("Index not built. Call build_index() first.")
-        
+
         if self.index.ntotal == 0:
             self.logger.warning("Index is empty")
             return []
-        
+
         # Generate query embedding
         query_embedding = self.generate_embeddings([query])
 
@@ -305,68 +316,76 @@ class EmbeddingSystem:
         for rank, (chunk_id, score) in enumerate(ranked, 1):
             chunk_info = details.get(chunk_id)
             if chunk_info:
-                results.append({
-                    'chunk_id': chunk_id,
-                    'similarity_score': score,
-                    'rank': rank,
-                    **chunk_info
-                })
+                results.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "similarity_score": score,
+                        "rank": rank,
+                        **chunk_info,
+                    }
+                )
 
         return results
-    
+
     def _get_chunk_details(self, chunk_id: str) -> Optional[Dict]:
         """Get full chunk details from database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT chunk_id, text, source_title, source_url, source_file, 
                        page_number, chunk_index, word_count, char_count
                 FROM chunks 
                 WHERE chunk_id = ?
-            """, (chunk_id,))
-            
+            """,
+                (chunk_id,),
+            )
+
             row = cursor.fetchone()
             if row:
                 return {
-                    'chunk_id': row[0],
-                    'text': row[1],
-                    'source_title': row[2],
-                    'source_url': row[3],
-                    'source_file': row[4],
-                    'page_number': row[5],
-                    'chunk_index': row[6],
-                    'word_count': row[7],
-                    'char_count': row[8]
+                    "chunk_id": row[0],
+                    "text": row[1],
+                    "source_title": row[2],
+                    "source_url": row[3],
+                    "source_file": row[4],
+                    "page_number": row[5],
+                    "chunk_index": row[6],
+                    "word_count": row[7],
+                    "char_count": row[8],
                 }
         return None
-    
+
     def _get_chunk_details_batch(self, chunk_ids: List[str]) -> Dict[str, Dict]:
         """Get full chunk details for many chunk IDs in a single query."""
         if not chunk_ids:
             return {}
 
-        placeholders = ','.join('?' * len(chunk_ids))
+        placeholders = ",".join("?" * len(chunk_ids))
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute(f"""
+            cursor.execute(
+                f"""
                 SELECT chunk_id, text, source_title, source_url, source_file,
                        page_number, chunk_index, word_count, char_count
                 FROM chunks
                 WHERE chunk_id IN ({placeholders})
-            """, chunk_ids)
+            """,
+                chunk_ids,
+            )
             rows = cursor.fetchall()
 
         return {
             row[0]: {
-                'chunk_id': row[0],
-                'text': row[1],
-                'source_title': row[2],
-                'source_url': row[3],
-                'source_file': row[4],
-                'page_number': row[5],
-                'chunk_index': row[6],
-                'word_count': row[7],
-                'char_count': row[8],
+                "chunk_id": row[0],
+                "text": row[1],
+                "source_title": row[2],
+                "source_url": row[3],
+                "source_file": row[4],
+                "page_number": row[5],
+                "chunk_index": row[6],
+                "word_count": row[7],
+                "char_count": row[8],
             }
             for row in rows
         }
@@ -383,51 +402,57 @@ class EmbeddingSystem:
         """
         details = self._get_chunk_details_batch(chunk_ids)
         return [details[cid] for cid in chunk_ids if cid in details]
-    
+
     def get_index_stats(self) -> Dict:
         """Get statistics about the index."""
         if self.index is None:
-            return {'status': 'not_built'}
-        
+            return {"status": "not_built"}
+
         return {
-            'total_vectors': self.index.ntotal,
-            'embedding_dimension': self.embedding_dim,
-            'model_name': self.model_name,
-            'index_type': 'FlatIP',
-            'status': 'ready'
+            "total_vectors": self.index.ntotal,
+            "embedding_dimension": self.embedding_dim,
+            "model_name": self.model_name,
+            "index_type": "FlatIP",
+            "status": "ready",
         }
-    
+
     def test_search(self, query: str = "machine safety requirements") -> None:
         """Test the search functionality with a sample query."""
         self.logger.info(f"Testing search with query: '{query}'")
-        
+
         results = self.search_similar(query, k=3)
-        
+
         print(f"\n🔍 Search Results for: '{query}'")
         print("=" * 60)
-        
+
         for result in results:
-            print(f"\n📄 Rank {result['rank']} (Score: {result['similarity_score']:.3f})")
+            print(
+                f"\n📄 Rank {result['rank']} (Score: {result['similarity_score']:.3f})"
+            )
             print(f"Source: {result['source_title']}")
             print(f"File: {result['source_file']}")
-            if result['page_number']:
+            if result["page_number"]:
                 print(f"Page: {result['page_number']}")
             print(f"Text: {result['text'][:200]}...")
             print("-" * 40)
 
+
 def main():
     """Main function for testing embedding system."""
     embedding_system = EmbeddingSystem()
-    
+
     # Build index
     print("🚀 Building embedding index...")
     stats = embedding_system.build_index()
     print(f"Build stats: {stats}")
-    
+
     # Test search
-    embedding_system.test_search("What are the safety requirements for industrial machinery?")
+    embedding_system.test_search(
+        "What are the safety requirements for industrial machinery?"
+    )
     embedding_system.test_search("risk assessment procedures")
     embedding_system.test_search("machine guarding")
+
 
 if __name__ == "__main__":
     main()

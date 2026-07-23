@@ -21,9 +21,9 @@ from rag_qa.embedding_system import EmbeddingSystem
 
 # Download required NLTK data. Newer NLTK splits punkt into punkt_tab.
 for _resource, _path in (
-    ('punkt', 'tokenizers/punkt'),
-    ('punkt_tab', 'tokenizers/punkt_tab'),
-    ('stopwords', 'corpora/stopwords'),
+    ("punkt", "tokenizers/punkt"),
+    ("punkt_tab", "tokenizers/punkt_tab"),
+    ("stopwords", "corpora/stopwords"),
 ):
     try:
         nltk.data.find(_path)
@@ -33,9 +33,11 @@ for _resource, _path in (
         except Exception:  # pragma: no cover - offline fallback
             pass
 
+
 @dataclass
 class SearchResult:
     """Represents a search result with all relevant information."""
+
     chunk_id: str
     text: str
     source_title: str
@@ -44,28 +46,31 @@ class SearchResult:
     page_number: Optional[int]
     chunk_index: int
     word_count: int
-    
+
     # Scores
     vector_score: float
     bm25_score: float = 0.0
     hybrid_score: float = 0.0
     final_rank: int = 0
-    
+
     # Metadata
     reranker_used: str = "baseline"
     confidence: float = 0.0
 
+
 class SearchSystem:
     """Comprehensive search system with baseline and hybrid reranking."""
-    
-    def __init__(self,
-                 db_path: str = "data/rag_database.db",
-                 embedding_system: Optional[EmbeddingSystem] = None,
-                 hybrid_alpha: float = 0.7,  # Weight for vector vs BM25 scores
-                 similarity_threshold: float = 0.3,
-                 rrf_k: int = 60,  # Reciprocal Rank Fusion constant
-                 cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
-                 bm25_cache_path: Optional[str] = None):
+
+    def __init__(
+        self,
+        db_path: str = "data/rag_database.db",
+        embedding_system: Optional[EmbeddingSystem] = None,
+        hybrid_alpha: float = 0.7,  # Weight for vector vs BM25 scores
+        similarity_threshold: float = 0.3,
+        rrf_k: int = 60,  # Reciprocal Rank Fusion constant
+        cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        bm25_cache_path: Optional[str] = None,
+    ):
         """
         Initialize the search system.
 
@@ -95,7 +100,7 @@ class SearchSystem:
 
         # Get English stopwords first
         try:
-            self.stop_words = set(stopwords.words('english'))
+            self.stop_words = set(stopwords.words("english"))
         except LookupError:
             self.stop_words = set()
 
@@ -114,7 +119,7 @@ class SearchSystem:
 
         # Warn loudly if the FAISS index has drifted from the database.
         self._check_consistency()
-    
+
     def _build_bm25_index(self) -> None:
         """Build BM25 index from all document chunks.
 
@@ -141,7 +146,9 @@ class SearchSystem:
         fingerprint = self.embedding_system._compute_corpus_fingerprint(self.chunk_ids)
         tokenized_corpus = self._load_tokenized_corpus(fingerprint)
         if tokenized_corpus is None:
-            tokenized_corpus = [self._tokenize_for_bm25(text) for text in self.chunk_texts]
+            tokenized_corpus = [
+                self._tokenize_for_bm25(text) for text in self.chunk_texts
+            ]
             self._save_tokenized_corpus(fingerprint, tokenized_corpus)
 
         # Build BM25 index
@@ -153,11 +160,11 @@ class SearchSystem:
         if not os.path.exists(self.bm25_cache_path):
             return None
         try:
-            with open(self.bm25_cache_path, 'r', encoding='utf-8') as f:
+            with open(self.bm25_cache_path, "r", encoding="utf-8") as f:
                 cache = json.load(f)
-            if cache.get('fingerprint') == fingerprint:
+            if cache.get("fingerprint") == fingerprint:
                 self.logger.info("Loaded cached BM25 tokenized corpus")
-                return cache['corpus']
+                return cache["corpus"]
         except Exception as e:
             self.logger.warning(f"Failed to load BM25 cache: {e}")
         return None
@@ -166,8 +173,8 @@ class SearchSystem:
         """Persist the tokenized corpus keyed by the corpus fingerprint."""
         try:
             os.makedirs(os.path.dirname(self.bm25_cache_path) or ".", exist_ok=True)
-            with open(self.bm25_cache_path, 'w', encoding='utf-8') as f:
-                json.dump({'fingerprint': fingerprint, 'corpus': corpus}, f)
+            with open(self.bm25_cache_path, "w", encoding="utf-8") as f:
+                json.dump({"fingerprint": fingerprint, "corpus": corpus}, f)
         except Exception as e:
             self.logger.warning(f"Failed to write BM25 cache: {e}")
 
@@ -182,23 +189,24 @@ class SearchSystem:
                 )
         except Exception as e:  # pragma: no cover - defensive
             self.logger.warning(f"Could not verify index consistency: {e}")
-    
+
     def _tokenize_for_bm25(self, text: str) -> List[str]:
         """Tokenize text for BM25 indexing."""
         # Clean and normalize text
         text = text.lower()
-        text = re.sub(r'[^\w\s]', ' ', text)  # Remove punctuation
-        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
-        
+        text = re.sub(r"[^\w\s]", " ", text)  # Remove punctuation
+        text = re.sub(r"\s+", " ", text)  # Normalize whitespace
+
         # Tokenize
         tokens = word_tokenize(text)
-        
+
         # Remove stopwords and short tokens
-        tokens = [token for token in tokens 
-                 if token not in self.stop_words and len(token) > 2]
-        
+        tokens = [
+            token for token in tokens if token not in self.stop_words and len(token) > 2
+        ]
+
         return tokens
-    
+
     def _get_bm25_scores(self, query: str) -> List[float]:
         """Get BM25 scores for a query over the whole corpus."""
         if self.bm25 is None:
@@ -211,7 +219,9 @@ class SearchSystem:
         scores = self.bm25.get_scores(query_tokens)
         return scores.tolist()
 
-    def _get_bm25_scores_for_chunks(self, query: str, chunk_ids: List[str]) -> List[float]:
+    def _get_bm25_scores_for_chunks(
+        self, query: str, chunk_ids: List[str]
+    ) -> List[float]:
         """
         BM25 scores for a specific set of chunks only.
 
@@ -234,59 +244,56 @@ class SearchSystem:
         for idx in candidate_indices:
             scores.append(float(next(it)) if idx is not None else 0.0)
         return scores
-    
-    def baseline_search(self, 
-                       query: str, 
-                       k: int = 5) -> List[SearchResult]:
+
+    def baseline_search(self, query: str, k: int = 5) -> List[SearchResult]:
         """
         Perform baseline vector similarity search.
-        
+
         Args:
             query: Search query
             k: Number of results to return
-            
+
         Returns:
             List of SearchResult objects
         """
         # Get vector similarity results
         vector_results = self.embedding_system.search_similar(query, k=k)
-        
+
         search_results = []
         for i, result in enumerate(vector_results):
             # Filter by similarity threshold
-            if result['similarity_score'] < self.similarity_threshold:
+            if result["similarity_score"] < self.similarity_threshold:
                 continue
-            
+
             search_result = SearchResult(
-                chunk_id=result['chunk_id'],
-                text=result['text'],
-                source_title=result['source_title'],
-                source_url=result['source_url'],
-                source_file=result['source_file'],
-                page_number=result['page_number'],
-                chunk_index=result['chunk_index'],
-                word_count=result['word_count'],
-                vector_score=result['similarity_score'],
+                chunk_id=result["chunk_id"],
+                text=result["text"],
+                source_title=result["source_title"],
+                source_url=result["source_url"],
+                source_file=result["source_file"],
+                page_number=result["page_number"],
+                chunk_index=result["chunk_index"],
+                word_count=result["word_count"],
+                vector_score=result["similarity_score"],
                 final_rank=i + 1,
                 reranker_used="baseline",
-                confidence=result['similarity_score']
+                confidence=result["similarity_score"],
             )
             search_results.append(search_result)
-        
+
         return search_results
-    
-    def hybrid_search(self, 
-                     query: str, 
-                     k: int = 5,
-                     initial_k: int = None) -> List[SearchResult]:
+
+    def hybrid_search(
+        self, query: str, k: int = 5, initial_k: int = None
+    ) -> List[SearchResult]:
         """
         Perform hybrid search combining vector similarity and BM25.
-        
+
         Args:
             query: Search query
             k: Number of final results to return
             initial_k: Number of initial vector results to rerank (default: k*3)
-            
+
         Returns:
             List of SearchResult objects, reranked by hybrid score
         """
@@ -300,7 +307,7 @@ class SearchSystem:
             return []
 
         # BM25 scores for just the candidate chunks (not the whole corpus).
-        candidate_ids = [r['chunk_id'] for r in vector_results]
+        candidate_ids = [r["chunk_id"] for r in vector_results]
         relevant_bm25_scores = self._get_bm25_scores_for_chunks(query, candidate_ids)
 
         # Normalize BM25 scores to 0-1 within this candidate set.
@@ -313,25 +320,26 @@ class SearchSystem:
         # Calculate hybrid scores
         search_results = []
         for result, bm25_score in zip(vector_results, normalized_bm25_scores):
-            vector_score = result['similarity_score']
+            vector_score = result["similarity_score"]
 
             # Hybrid score: weighted combination (used for RANKING only).
-            hybrid_score = (self.hybrid_alpha * vector_score +
-                           (1 - self.hybrid_alpha) * bm25_score)
+            hybrid_score = (
+                self.hybrid_alpha * vector_score + (1 - self.hybrid_alpha) * bm25_score
+            )
 
             # Filter by similarity threshold (applied to vector score)
             if vector_score < self.similarity_threshold:
                 continue
 
             search_result = SearchResult(
-                chunk_id=result['chunk_id'],
-                text=result['text'],
-                source_title=result['source_title'],
-                source_url=result['source_url'],
-                source_file=result['source_file'],
-                page_number=result['page_number'],
-                chunk_index=result['chunk_index'],
-                word_count=result['word_count'],
+                chunk_id=result["chunk_id"],
+                text=result["text"],
+                source_title=result["source_title"],
+                source_url=result["source_url"],
+                source_file=result["source_file"],
+                page_number=result["page_number"],
+                chunk_index=result["chunk_index"],
+                word_count=result["word_count"],
                 vector_score=vector_score,
                 bm25_score=bm25_score,
                 hybrid_score=hybrid_score,
@@ -340,7 +348,7 @@ class SearchSystem:
                 # queries), NOT the hybrid score whose BM25 term is normalized
                 # per-query and therefore not comparable. This lets a single
                 # abstention threshold behave consistently across modes.
-                confidence=vector_score
+                confidence=vector_score,
             )
             search_results.append(search_result)
 
@@ -353,7 +361,9 @@ class SearchSystem:
 
         return search_results[:k]
 
-    def rrf_search(self, query: str, k: int = 5, initial_k: int = None) -> List[SearchResult]:
+    def rrf_search(
+        self, query: str, k: int = 5, initial_k: int = None
+    ) -> List[SearchResult]:
         """
         Rank-fusion search using Reciprocal Rank Fusion (RRF).
 
@@ -369,12 +379,14 @@ class SearchSystem:
         if not vector_results:
             return []
 
-        candidate_ids = [r['chunk_id'] for r in vector_results]
+        candidate_ids = [r["chunk_id"] for r in vector_results]
         bm25_scores = self._get_bm25_scores_for_chunks(query, candidate_ids)
 
         # Vector rank: order returned by FAISS. BM25 rank: order by BM25 score.
         vector_rank = {cid: i for i, cid in enumerate(candidate_ids)}
-        bm25_order = sorted(range(len(candidate_ids)), key=lambda i: bm25_scores[i], reverse=True)
+        bm25_order = sorted(
+            range(len(candidate_ids)), key=lambda i: bm25_scores[i], reverse=True
+        )
         bm25_rank = {candidate_ids[pos]: rank for rank, pos in enumerate(bm25_order)}
 
         fused = {}
@@ -384,27 +396,29 @@ class SearchSystem:
                 score += 1.0 / (self.rrf_k + bm25_rank[cid])
             fused[cid] = score
 
-        results_by_id = {r['chunk_id']: r for r in vector_results}
+        results_by_id = {r["chunk_id"]: r for r in vector_results}
         search_results = []
         for cid in candidate_ids:
             result = results_by_id[cid]
-            if result['similarity_score'] < self.similarity_threshold:
+            if result["similarity_score"] < self.similarity_threshold:
                 continue
-            search_results.append(SearchResult(
-                chunk_id=cid,
-                text=result['text'],
-                source_title=result['source_title'],
-                source_url=result['source_url'],
-                source_file=result['source_file'],
-                page_number=result['page_number'],
-                chunk_index=result['chunk_index'],
-                word_count=result['word_count'],
-                vector_score=result['similarity_score'],
-                bm25_score=bm25_scores[vector_rank[cid]],
-                hybrid_score=fused[cid],
-                reranker_used="rrf",
-                confidence=result['similarity_score'],
-            ))
+            search_results.append(
+                SearchResult(
+                    chunk_id=cid,
+                    text=result["text"],
+                    source_title=result["source_title"],
+                    source_url=result["source_url"],
+                    source_file=result["source_file"],
+                    page_number=result["page_number"],
+                    chunk_index=result["chunk_index"],
+                    word_count=result["word_count"],
+                    vector_score=result["similarity_score"],
+                    bm25_score=bm25_scores[vector_rank[cid]],
+                    hybrid_score=fused[cid],
+                    reranker_used="rrf",
+                    confidence=result["similarity_score"],
+                )
+            )
 
         search_results.sort(key=lambda x: x.hybrid_score, reverse=True)
         for i, result in enumerate(search_results[:k]):
@@ -415,12 +429,14 @@ class SearchSystem:
         """Lazily load the cross-encoder model (optional dependency/download)."""
         if self._cross_encoder is None:
             from sentence_transformers import CrossEncoder
+
             self.logger.info(f"Loading cross-encoder: {self.cross_encoder_model}")
             self._cross_encoder = CrossEncoder(self.cross_encoder_model)
         return self._cross_encoder
 
-    def cross_encoder_search(self, query: str, k: int = 5,
-                             initial_k: int = None) -> List[SearchResult]:
+    def cross_encoder_search(
+        self, query: str, k: int = 5, initial_k: int = None
+    ) -> List[SearchResult]:
         """
         Rerank candidates with a cross-encoder for the strongest relevance
         signal. Falls back to hybrid mode if the model cannot be loaded
@@ -440,41 +456,42 @@ class SearchSystem:
             self.logger.warning(f"Cross-encoder unavailable ({e}); using hybrid.")
             return self.hybrid_search(query, k=k)
 
-        pairs = [[query, r['text']] for r in vector_results]
+        pairs = [[query, r["text"]] for r in vector_results]
         raw_scores = model.predict(pairs)
         # Map logits to (0, 1) so confidence is interpretable.
         confidences = 1.0 / (1.0 + np.exp(-np.asarray(raw_scores)))
 
         search_results = []
         for result, raw, conf in zip(vector_results, raw_scores, confidences):
-            search_results.append(SearchResult(
-                chunk_id=result['chunk_id'],
-                text=result['text'],
-                source_title=result['source_title'],
-                source_url=result['source_url'],
-                source_file=result['source_file'],
-                page_number=result['page_number'],
-                chunk_index=result['chunk_index'],
-                word_count=result['word_count'],
-                vector_score=result['similarity_score'],
-                bm25_score=0.0,
-                hybrid_score=float(raw),
-                reranker_used="cross_encoder",
-                confidence=float(conf),
-            ))
+            search_results.append(
+                SearchResult(
+                    chunk_id=result["chunk_id"],
+                    text=result["text"],
+                    source_title=result["source_title"],
+                    source_url=result["source_url"],
+                    source_file=result["source_file"],
+                    page_number=result["page_number"],
+                    chunk_index=result["chunk_index"],
+                    word_count=result["word_count"],
+                    vector_score=result["similarity_score"],
+                    bm25_score=0.0,
+                    hybrid_score=float(raw),
+                    reranker_used="cross_encoder",
+                    confidence=float(conf),
+                )
+            )
 
         search_results.sort(key=lambda x: x.hybrid_score, reverse=True)
         for i, result in enumerate(search_results[:k]):
             result.final_rank = i + 1
         return search_results[:k]
-    
-    def search(self, 
-              query: str, 
-              k: int = 5, 
-              mode: str = "hybrid") -> List[SearchResult]:
+
+    def search(
+        self, query: str, k: int = 5, mode: str = "hybrid"
+    ) -> List[SearchResult]:
         """
         Main search interface.
-        
+
         Args:
             query: Search query
             k: Number of results to return
@@ -494,155 +511,167 @@ class SearchSystem:
             return self.cross_encoder_search(query, k=k)
         else:
             raise ValueError(f"Unknown search mode: {mode}")
-    
-    def get_chunk_context(self, 
-                         chunk_id: str, 
-                         context_size: int = 1) -> Optional[str]:
+
+    def get_chunk_context(self, chunk_id: str, context_size: int = 1) -> Optional[str]:
         """
         Get surrounding context for a chunk (previous/next chunks from same document).
-        
+
         Args:
             chunk_id: Target chunk ID
             context_size: Number of chunks before/after to include
-            
+
         Returns:
             Extended context text or None if not found
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            
+
             # Get the target chunk info
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT source_file, chunk_index, text 
                 FROM chunks 
                 WHERE chunk_id = ?
-            """, (chunk_id,))
-            
+            """,
+                (chunk_id,),
+            )
+
             result = cursor.fetchone()
             if not result:
                 return None
-            
+
             source_file, chunk_index, target_text = result
-            
+
             # Get surrounding chunks
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT text, chunk_index
                 FROM chunks 
                 WHERE source_file = ? 
                 AND chunk_index BETWEEN ? AND ?
                 ORDER BY chunk_index
-            """, (source_file, 
-                  chunk_index - context_size, 
-                  chunk_index + context_size))
-            
+            """,
+                (source_file, chunk_index - context_size, chunk_index + context_size),
+            )
+
             context_chunks = cursor.fetchall()
-            
+
             if context_chunks:
                 context_texts = [chunk[0] for chunk in context_chunks]
                 return " ... ".join(context_texts)
-            
+
             return target_text
-    
-    def explain_search(self, 
-                      query: str, 
-                      k: int = 3) -> Dict:
+
+    def explain_search(self, query: str, k: int = 3) -> Dict:
         """
         Explain how search results are ranked (for debugging/analysis).
-        
+
         Args:
             query: Search query
             k: Number of results to analyze
-            
+
         Returns:
             Dictionary with detailed scoring information
         """
         # Get both baseline and hybrid results
         baseline_results = self.baseline_search(query, k=k)
         hybrid_results = self.hybrid_search(query, k=k)
-        
+
         # Analyze score differences
         explanation = {
-            'query': query,
-            'hybrid_alpha': self.hybrid_alpha,
-            'similarity_threshold': self.similarity_threshold,
-            'baseline_results': [],
-            'hybrid_results': [],
-            'ranking_changes': []
+            "query": query,
+            "hybrid_alpha": self.hybrid_alpha,
+            "similarity_threshold": self.similarity_threshold,
+            "baseline_results": [],
+            "hybrid_results": [],
+            "ranking_changes": [],
         }
-        
+
         # Baseline results details
         for result in baseline_results:
-            explanation['baseline_results'].append({
-                'rank': result.final_rank,
-                'chunk_id': result.chunk_id,
-                'vector_score': result.vector_score,
-                'source': result.source_title,
-                'text_preview': result.text[:100] + "..."
-            })
-        
+            explanation["baseline_results"].append(
+                {
+                    "rank": result.final_rank,
+                    "chunk_id": result.chunk_id,
+                    "vector_score": result.vector_score,
+                    "source": result.source_title,
+                    "text_preview": result.text[:100] + "...",
+                }
+            )
+
         # Hybrid results details
         for result in hybrid_results:
-            explanation['hybrid_results'].append({
-                'rank': result.final_rank,
-                'chunk_id': result.chunk_id,
-                'vector_score': result.vector_score,
-                'bm25_score': result.bm25_score,
-                'hybrid_score': result.hybrid_score,
-                'source': result.source_title,
-                'text_preview': result.text[:100] + "..."
-            })
-        
+            explanation["hybrid_results"].append(
+                {
+                    "rank": result.final_rank,
+                    "chunk_id": result.chunk_id,
+                    "vector_score": result.vector_score,
+                    "bm25_score": result.bm25_score,
+                    "hybrid_score": result.hybrid_score,
+                    "source": result.source_title,
+                    "text_preview": result.text[:100] + "...",
+                }
+            )
+
         # Find ranking changes
         baseline_order = [r.chunk_id for r in baseline_results]
         hybrid_order = [r.chunk_id for r in hybrid_results]
-        
+
         for i, chunk_id in enumerate(hybrid_order):
             if chunk_id in baseline_order:
                 baseline_rank = baseline_order.index(chunk_id) + 1
                 hybrid_rank = i + 1
                 if baseline_rank != hybrid_rank:
-                    explanation['ranking_changes'].append({
-                        'chunk_id': chunk_id,
-                        'baseline_rank': baseline_rank,
-                        'hybrid_rank': hybrid_rank,
-                        'change': baseline_rank - hybrid_rank
-                    })
-        
+                    explanation["ranking_changes"].append(
+                        {
+                            "chunk_id": chunk_id,
+                            "baseline_rank": baseline_rank,
+                            "hybrid_rank": hybrid_rank,
+                            "change": baseline_rank - hybrid_rank,
+                        }
+                    )
+
         return explanation
+
 
 def main():
     """Test the search system."""
     search_system = SearchSystem()
-    
+
     # Test queries
     test_queries = [
         "What are the safety requirements for industrial machinery?",
         "risk assessment procedures",
         "machine guarding requirements",
-        "emergency stop systems"
+        "emergency stop systems",
     ]
-    
+
     print("🔍 Testing Search System")
     print("=" * 60)
-    
+
     for query in test_queries:
         print(f"\n📝 Query: '{query}'")
         print("-" * 40)
-        
+
         # Compare baseline vs hybrid
         baseline_results = search_system.search(query, k=3, mode="baseline")
         hybrid_results = search_system.search(query, k=3, mode="hybrid")
-        
+
         print("Baseline Results:")
         for result in baseline_results:
-            print(f"  {result.final_rank}. Score: {result.vector_score:.3f} | {result.source_title}")
-        
+            print(
+                f"  {result.final_rank}. Score: {result.vector_score:.3f} | {result.source_title}"
+            )
+
         print("\nHybrid Results:")
         for result in hybrid_results:
-            print(f"  {result.final_rank}. Vector: {result.vector_score:.3f}, BM25: {result.bm25_score:.3f}, "
-                  f"Hybrid: {result.hybrid_score:.3f} | {result.source_title}")
-        
+            print(
+                f"  {result.final_rank}. Vector: {result.vector_score:.3f}, BM25: {result.bm25_score:.3f}, "
+                f"Hybrid: {result.hybrid_score:.3f} | {result.source_title}"
+            )
+
         print()
+
 
 if __name__ == "__main__":
     main()

@@ -18,8 +18,16 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 REQUIRED_PACKAGES = [
-    "numpy", "faiss", "sentence_transformers", "transformers",
-    "pypdf", "nltk", "flask", "flask_cors", "rank_bm25", "requests",
+    "numpy",
+    "faiss",
+    "sentence_transformers",
+    "transformers",
+    "pypdf",
+    "nltk",
+    "flask",
+    "flask_cors",
+    "rank_bm25",
+    "requests",
 ]
 
 DATA_FILES = [
@@ -41,8 +49,11 @@ def main() -> int:
 
     print("Python:")
     py_ok = sys.version_info >= (3, 9)
-    all_ok &= check(f"Python {sys.version_info.major}.{sys.version_info.minor}",
-                    py_ok, "3.9+ required")
+    all_ok &= check(
+        f"Python {sys.version_info.major}.{sys.version_info.minor}",
+        py_ok,
+        "3.9+ required",
+    )
 
     print("\nPackages:")
     for pkg in REQUIRED_PACKAGES:
@@ -56,14 +67,21 @@ def main() -> int:
     print("\nNLTK data:")
     try:
         import nltk
-        for resource, path in (("punkt", "tokenizers/punkt"),
-                               ("stopwords", "corpora/stopwords")):
+
+        for resource, path in (
+            ("punkt", "tokenizers/punkt"),
+            ("stopwords", "corpora/stopwords"),
+        ):
             try:
                 nltk.data.find(path)
                 check(resource, True)
             except (LookupError, OSError):
                 all_ok = False
-                check(resource, False, f"run: python -c \"import nltk; nltk.download('{resource}')\"")
+                check(
+                    resource,
+                    False,
+                    f"run: python -c \"import nltk; nltk.download('{resource}')\"",
+                )
     except Exception as e:
         all_ok = False
         check("nltk", False, str(e))

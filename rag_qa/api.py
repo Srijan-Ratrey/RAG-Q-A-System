@@ -17,15 +17,18 @@ from rag_qa.search_system import SearchSystem, SearchResult
 # Accepted search modes (shared by the /ask and /search endpoints).
 VALID_MODES = {"baseline", "hybrid", "rrf", "cross_encoder", "cross-encoder"}
 
+
 class AnswerGenerator:
     """Generates extractive answers from search results with citations."""
-    
-    def __init__(self,
-                 confidence_threshold: float = 0.35,
-                 embedding_system=None,
-                 num_source_chunks: int = 3,
-                 num_answer_sentences: int = 3,
-                 max_answer_chars: int = 400):
+
+    def __init__(
+        self,
+        confidence_threshold: float = 0.35,
+        embedding_system=None,
+        num_source_chunks: int = 3,
+        num_answer_sentences: int = 3,
+        max_answer_chars: int = 400,
+    ):
         """
         Initialize answer generator.
 
@@ -52,9 +55,9 @@ class AnswerGenerator:
         self.max_answer_chars = max_answer_chars
         self.logger = logging.getLogger(__name__)
 
-    def extract_answer(self,
-                      query: str,
-                      search_results: List[SearchResult]) -> Tuple[Optional[str], float, str]:
+    def extract_answer(
+        self, query: str, search_results: List[SearchResult]
+    ) -> Tuple[Optional[str], float, str]:
         """
         Extract an answer from search results.
 
@@ -73,11 +76,15 @@ class AnswerGenerator:
 
         # Check confidence threshold
         if top_result.confidence < self.confidence_threshold:
-            return None, top_result.confidence, f"Low confidence score: {top_result.confidence:.3f}"
+            return (
+                None,
+                top_result.confidence,
+                f"Low confidence score: {top_result.confidence:.3f}",
+            )
 
         # Query-aware extraction over the top few chunks.
         answer_text = self._extract_relevant_sentences(
-            query, search_results[:self.num_source_chunks]
+            query, search_results[: self.num_source_chunks]
         )
 
         return answer_text, top_result.confidence, "Answer extracted from top results"
@@ -94,7 +101,9 @@ class AnswerGenerator:
                     sentences.append(sentence)
         return sentences
 
-    def _extract_relevant_sentences(self, query: str, results: List[SearchResult]) -> str:
+    def _extract_relevant_sentences(
+        self, query: str, results: List[SearchResult]
+    ) -> str:
         """
         Extract the sentences most relevant to the query.
 
@@ -105,7 +114,7 @@ class AnswerGenerator:
         """
         sentences = self._candidate_sentences(results)
         if not sentences:
-            return results[0].text[:self.max_answer_chars].strip()
+            return results[0].text[: self.max_answer_chars].strip()
 
         n = self.num_answer_sentences
         if self.embedding_system is None or len(sentences) <= n:
@@ -119,20 +128,23 @@ class AnswerGenerator:
             # Preserve original reading order for a coherent answer.
             selected_idx = sorted(int(i) for i in top_idx)
 
-        answer = ' '.join(sentences[i] for i in selected_idx)
+        answer = " ".join(sentences[i] for i in selected_idx)
 
         if len(answer) > self.max_answer_chars:
-            answer = answer[:self.max_answer_chars - 3].rstrip() + "..."
+            answer = answer[: self.max_answer_chars - 3].rstrip() + "..."
 
         return answer.strip()
 
+
 class QAService:
     """Main Q&A service combining search and answer generation."""
-    
-    def __init__(self,
-                 db_path: str = "data/rag_database.db",
-                 confidence_threshold: float = 0.35,
-                 search_system: Optional[SearchSystem] = None):
+
+    def __init__(
+        self,
+        db_path: str = "data/rag_database.db",
+        confidence_threshold: float = 0.35,
+        search_system: Optional[SearchSystem] = None,
+    ):
         """
         Initialize Q&A service.
 
@@ -149,45 +161,48 @@ class QAService:
             embedding_system=self.search_system.embedding_system,
         )
         self.logger = logging.getLogger(__name__)
-    
-    def ask(self, 
-           query: str, 
-           k: int = 5, 
-           mode: str = "hybrid") -> Dict:
+
+    def ask(self, query: str, k: int = 5, mode: str = "hybrid") -> Dict:
         """
         Answer a question using the Q&A system.
-        
+
         Args:
             query: Question to answer
             k: Number of context chunks to return
             mode: Search mode ("baseline" or "hybrid")
-            
+
         Returns:
             Dictionary with answer, contexts, and metadata
         """
         try:
             # Search for relevant documents
             search_results = self.search_system.search(query, k=k, mode=mode)
-            
+
             # Generate answer
-            answer, confidence, reason = self.answer_generator.extract_answer(query, search_results)
-            
+            answer, confidence, reason = self.answer_generator.extract_answer(
+                query, search_results
+            )
+
             # Format contexts for response
             contexts = []
             for result in search_results:
                 context = {
                     "text": result.text,
-                    "score": result.vector_score if mode == "baseline" else result.hybrid_score,
+                    "score": result.vector_score
+                    if mode == "baseline"
+                    else result.hybrid_score,
                     "source": result.source_title,
                     "url": result.source_url if result.source_url else "",
                     "file": result.source_file,
                     "page": result.page_number,
                     "chunk_id": result.chunk_id,
                     "vector_score": result.vector_score,
-                    "bm25_score": result.bm25_score if hasattr(result, 'bm25_score') else 0.0
+                    "bm25_score": result.bm25_score
+                    if hasattr(result, "bm25_score")
+                    else 0.0,
                 }
                 contexts.append(context)
-            
+
             response = {
                 "answer": answer,
                 "contexts": contexts,
@@ -195,11 +210,11 @@ class QAService:
                 "confidence": confidence,
                 "abstain_reason": reason if answer is None else None,
                 "query": query,
-                "total_results": len(search_results)
+                "total_results": len(search_results),
             }
-            
+
             return response
-            
+
         except Exception as e:
             # Log the detail server-side; return a generic reason to the client.
             self.logger.exception(f"Error processing query '{query}': {e}")
@@ -210,8 +225,9 @@ class QAService:
                 "confidence": 0.0,
                 "abstain_reason": "System error while processing the query",
                 "query": query,
-                "total_results": 0
+                "total_results": 0,
             }
+
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -219,8 +235,7 @@ CORS(app)  # Enable CORS for all routes
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 # Initialize QA service. Guarded by a lock so concurrent first-requests don't
@@ -231,6 +246,7 @@ import threading
 qa_service = None
 _qa_service_lock = threading.Lock()
 
+
 def get_qa_service():
     """Get or initialize the QA service (thread-safe, lazy)."""
     global qa_service
@@ -238,32 +254,32 @@ def get_qa_service():
         with _qa_service_lock:
             if qa_service is None:  # double-checked under the lock
                 db_path = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)), "data", "rag_database.db"
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "data",
+                    "rag_database.db",
                 )
                 qa_service = QAService(db_path=db_path)
     return qa_service
 
-@app.route('/health', methods=['GET'])
+
+@app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint."""
-    return jsonify({
-        "status": "healthy",
-        "service": "RAG Q&A API",
-        "version": "1.0.0"
-    })
+    return jsonify({"status": "healthy", "service": "RAG Q&A API", "version": "1.0.0"})
 
-@app.route('/ask', methods=['POST'])
+
+@app.route("/ask", methods=["POST"])
 def ask_question():
     """
     Main Q&A endpoint.
-    
+
     Request format:
     {
         "q": "What are the safety requirements?",
         "k": 5,
         "mode": "hybrid"
     }
-    
+
     Response format:
     {
         "answer": "Safety requirements include...",
@@ -277,32 +293,32 @@ def ask_question():
         # silent=True -> return None instead of raising 415 when the body is
         # missing or not JSON, so we can respond with a clean 400.
         data = request.get_json(silent=True)
-        
+
         if not data:
-            return jsonify({
-                "error": "Invalid JSON in request body"
-            }), 400
-        
+            return jsonify({"error": "Invalid JSON in request body"}), 400
+
         # Extract parameters
-        query = data.get('q', '').strip()
-        k = data.get('k', 5)
-        mode = data.get('mode', 'hybrid').lower()
-        
+        query = data.get("q", "").strip()
+        k = data.get("k", 5)
+        mode = data.get("mode", "hybrid").lower()
+
         # Validate parameters
         if not query:
-            return jsonify({
-                "error": "Query parameter 'q' is required and cannot be empty"
-            }), 400
-        
+            return jsonify(
+                {"error": "Query parameter 'q' is required and cannot be empty"}
+            ), 400
+
         if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > 20:
-            return jsonify({
-                "error": "Parameter 'k' must be an integer between 1 and 20"
-            }), 400
-        
+            return jsonify(
+                {"error": "Parameter 'k' must be an integer between 1 and 20"}
+            ), 400
+
         if mode not in VALID_MODES:
-            return jsonify({
-                "error": f"Parameter 'mode' must be one of: {', '.join(sorted(VALID_MODES))}"
-            }), 400
+            return jsonify(
+                {
+                    "error": f"Parameter 'mode' must be one of: {', '.join(sorted(VALID_MODES))}"
+                }
+            ), 400
 
         # Process query
         qa_service = get_qa_service()
@@ -315,11 +331,12 @@ def ask_question():
         app.logger.exception(f"Error in /ask endpoint: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/search', methods=['POST'])
+
+@app.route("/search", methods=["POST"])
 def search_documents():
     """
     Document search endpoint (no answer generation).
-    
+
     Request format:
     {
         "q": "search query",
@@ -331,118 +348,134 @@ def search_documents():
         # silent=True -> return None instead of raising 415 when the body is
         # missing or not JSON, so we can respond with a clean 400.
         data = request.get_json(silent=True)
-        
+
         if not data:
             return jsonify({"error": "Invalid JSON in request body"}), 400
-        
-        query = data.get('q', '').strip()
-        k = data.get('k', 10)
-        mode = data.get('mode', 'hybrid').lower()
+
+        query = data.get("q", "").strip()
+        k = data.get("k", 10)
+        mode = data.get("mode", "hybrid").lower()
 
         if not query:
             return jsonify({"error": "Query parameter 'q' is required"}), 400
 
         if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > 20:
-            return jsonify({
-                "error": "Parameter 'k' must be an integer between 1 and 20"
-            }), 400
+            return jsonify(
+                {"error": "Parameter 'k' must be an integer between 1 and 20"}
+            ), 400
 
         if mode not in VALID_MODES:
-            return jsonify({
-                "error": f"Parameter 'mode' must be one of: {', '.join(sorted(VALID_MODES))}"
-            }), 400
+            return jsonify(
+                {
+                    "error": f"Parameter 'mode' must be one of: {', '.join(sorted(VALID_MODES))}"
+                }
+            ), 400
 
         qa_service = get_qa_service()
         search_results = qa_service.search_system.search(query, k=k, mode=mode)
-        
+
         # Format results
         results = []
         for result in search_results:
-            results.append({
-                "chunk_id": result.chunk_id,
-                "text": result.text,
-                "source": result.source_title,
-                "url": result.source_url,
-                "file": result.source_file,
-                "page": result.page_number,
-                "rank": result.final_rank,
-                "vector_score": result.vector_score,
-                "bm25_score": getattr(result, 'bm25_score', 0.0),
-                "hybrid_score": getattr(result, 'hybrid_score', result.vector_score),
-                "confidence": result.confidence
-            })
-        
-        return jsonify({
-            "query": query,
-            "results": results,
-            "total_results": len(results),
-            "mode": mode
-        })
-        
+            results.append(
+                {
+                    "chunk_id": result.chunk_id,
+                    "text": result.text,
+                    "source": result.source_title,
+                    "url": result.source_url,
+                    "file": result.source_file,
+                    "page": result.page_number,
+                    "rank": result.final_rank,
+                    "vector_score": result.vector_score,
+                    "bm25_score": getattr(result, "bm25_score", 0.0),
+                    "hybrid_score": getattr(
+                        result, "hybrid_score", result.vector_score
+                    ),
+                    "confidence": result.confidence,
+                }
+            )
+
+        return jsonify(
+            {
+                "query": query,
+                "results": results,
+                "total_results": len(results),
+                "mode": mode,
+            }
+        )
+
     except Exception as e:
         app.logger.error(f"Error in /search endpoint: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/stats', methods=['GET'])
+
+@app.route("/stats", methods=["GET"])
 def get_stats():
     """Get system statistics."""
     try:
         qa_service = get_qa_service()
-        
+
         # Get embedding system stats
         embedding_stats = qa_service.search_system.embedding_system.get_index_stats()
-        
+
         # Get database stats (simplified)
         import sqlite3
+
         db_path = qa_service.search_system.db_path
-        
+
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM chunks")
             total_chunks = cursor.fetchone()[0]
-            
+
             cursor.execute("SELECT COUNT(DISTINCT source_file) FROM chunks")
             total_documents = cursor.fetchone()[0]
-        
-        return jsonify({
-            "embedding_stats": embedding_stats,
-            "database_stats": {
-                "total_chunks": total_chunks,
-                "total_documents": total_documents
-            },
-            "bm25_stats": {
-                "index_size": len(qa_service.search_system.chunk_texts),
-                "status": "ready" if qa_service.search_system.bm25 else "not_ready"
+
+        return jsonify(
+            {
+                "embedding_stats": embedding_stats,
+                "database_stats": {
+                    "total_chunks": total_chunks,
+                    "total_documents": total_documents,
+                },
+                "bm25_stats": {
+                    "index_size": len(qa_service.search_system.chunk_texts),
+                    "status": "ready" if qa_service.search_system.bm25 else "not_ready",
+                },
             }
-        })
-        
+        )
+
     except Exception as e:
         app.logger.error(f"Error in /stats endpoint: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/', methods=['GET'])
+
+@app.route("/", methods=["GET"])
 def home():
     """Home page with API documentation."""
-    return jsonify({
-        "service": "RAG Q&A API",
-        "version": "1.0.0",
-        "description": "Question answering system for industrial safety documents",
-        "endpoints": {
-            "/health": "GET - Health check",
-            "/ask": "POST - Ask a question",
-            "/search": "POST - Search documents",
-            "/stats": "GET - System statistics"
-        },
-        "example_request": {
-            "url": "/ask",
-            "method": "POST",
-            "body": {
-                "q": "What are the safety requirements for industrial machinery?",
-                "k": 5,
-                "mode": "hybrid"
-            }
+    return jsonify(
+        {
+            "service": "RAG Q&A API",
+            "version": "1.0.0",
+            "description": "Question answering system for industrial safety documents",
+            "endpoints": {
+                "/health": "GET - Health check",
+                "/ask": "POST - Ask a question",
+                "/search": "POST - Search documents",
+                "/stats": "GET - System statistics",
+            },
+            "example_request": {
+                "url": "/ask",
+                "method": "POST",
+                "body": {
+                    "q": "What are the safety requirements for industrial machinery?",
+                    "k": 5,
+                    "mode": "hybrid",
+                },
+            },
         }
-    })
+    )
+
 
 def main():
     """Run the Flask application (development server)."""
@@ -450,9 +483,9 @@ def main():
     # interactive debugger allows remote code execution, so it must never be
     # on by default — least of all bound to 0.0.0.0. Opt in explicitly for a
     # trusted local session only.
-    host = os.getenv('FLASK_HOST', '127.0.0.1')
-    port = int(os.getenv('FLASK_PORT', 9000))
-    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    host = os.getenv("FLASK_HOST", "127.0.0.1")
+    port = int(os.getenv("FLASK_PORT", 9000))
+    debug = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
     print(f"🚀 Starting RAG Q&A API on {host}:{port}")
     print(f"📚 Using database: {os.path.join('data', 'rag_database.db')}")
@@ -467,6 +500,7 @@ def main():
         app.logger.warning(f"Deferred QA service init (will retry on request): {e}")
 
     app.run(host=host, port=port, debug=debug)
+
 
 if __name__ == "__main__":
     main()

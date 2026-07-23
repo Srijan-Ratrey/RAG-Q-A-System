@@ -60,8 +60,9 @@ def derive_filename(source: dict, used: set) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download source PDFs.")
-    parser.add_argument("--force", action="store_true",
-                        help="Re-download files that already exist")
+    parser.add_argument(
+        "--force", action="store_true", help="Re-download files that already exist"
+    )
     args = parser.parse_args()
 
     with open(SOURCES_FILE, "r", encoding="utf-8") as f:

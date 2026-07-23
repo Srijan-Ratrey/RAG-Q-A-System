@@ -1,7 +1,10 @@
 """Unit tests for the IR metric functions."""
 
 from rag_qa.evaluation.metrics import (
-    recall_at_k, reciprocal_rank, ndcg_at_k, dedupe_preserve_order,
+    recall_at_k,
+    reciprocal_rank,
+    ndcg_at_k,
+    dedupe_preserve_order,
 )
 
 

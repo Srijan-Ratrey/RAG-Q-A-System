@@ -7,6 +7,7 @@ from rag_qa.document_processor import DocumentChunk
 
 # --- B1 regression: newline-dependent cleaning rules must actually fire ------
 
+
 def test_clean_text_removes_standalone_page_numbers(processor):
     text = "First paragraph of content here.\n42\nSecond paragraph continues on."
     cleaned = processor._clean_text(text)
@@ -38,6 +39,7 @@ def test_clean_text_collapses_horizontal_whitespace(processor):
 
 # --- Chunking ----------------------------------------------------------------
 
+
 def test_chunking_produces_overlap(processor):
     # 8 short sentences (~6 tokens each); chunk_size=40, overlap=10 forces
     # multiple chunks with a shared overlap sentence between them.
@@ -45,8 +47,9 @@ def test_chunking_produces_overlap(processor):
     chunks = processor._chunk_sentences(sentences)
     assert len(chunks) >= 2
     # The tail sentence(s) of chunk 0 must reappear at the start of chunk 1.
-    overlapping = [s for s in sentences
-                   if s[0] in chunks[0][0] and s[0] in chunks[1][0]]
+    overlapping = [
+        s for s in sentences if s[0] in chunks[0][0] and s[0] in chunks[1][0]
+    ]
     assert overlapping, "expected at least one sentence shared across chunks"
 
 
@@ -67,9 +70,11 @@ def test_chunking_splits_periodless_oversized_sentence(processor):
 
 def test_chunking_spans_page_boundaries(processor):
     # Sentences from two pages; a chunk should be allowed to include both.
-    sentences = [("Sentence one on the first page here.", 1),
-                 ("Sentence two also on the first page.", 1),
-                 ("Sentence three now on the second page.", 2)]
+    sentences = [
+        ("Sentence one on the first page here.", 1),
+        ("Sentence two also on the first page.", 1),
+        ("Sentence three now on the second page.", 2),
+    ]
     chunks = processor._chunk_sentences(sentences)
     # With a large chunk size everything lands in one chunk spanning pages 1-2.
     assert len(chunks) == 1
@@ -79,6 +84,7 @@ def test_chunking_spans_page_boundaries(processor):
 
 
 # --- C5 source attribution ---------------------------------------------------
+
 
 def test_source_matching_prefers_exact_filename(processor):
     title, url = processor._find_source_metadata("osha3170.pdf")
@@ -102,12 +108,19 @@ def test_generate_chunk_id_is_deterministic(processor):
 
 # --- C2 reprocessing must not leave orphan chunks ----------------------------
 
+
 def test_save_chunks_replaces_existing_source_rows(processor):
     def make(cid, idx):
         return DocumentChunk(
-            chunk_id=cid, text=f"chunk text body number {idx} here",
-            source_title="T", source_url="", source_file="doc.pdf",
-            page_number=1, chunk_index=idx, word_count=6, char_count=25,
+            chunk_id=cid,
+            text=f"chunk text body number {idx} here",
+            source_title="T",
+            source_url="",
+            source_file="doc.pdf",
+            page_number=1,
+            chunk_index=idx,
+            word_count=6,
+            char_count=25,
         )
 
     processor.save_chunks([make("old1", 0), make("old2", 1)])
@@ -115,6 +128,10 @@ def test_save_chunks_replaces_existing_source_rows(processor):
     processor.save_chunks([make("new1", 0)])
 
     with sqlite3.connect(processor.db_path) as conn:
-        ids = {row[0] for row in conn.execute(
-            "SELECT chunk_id FROM chunks WHERE source_file = 'doc.pdf'")}
+        ids = {
+            row[0]
+            for row in conn.execute(
+                "SELECT chunk_id FROM chunks WHERE source_file = 'doc.pdf'"
+            )
+        }
     assert ids == {"new1"}  # old rows deleted, no orphans

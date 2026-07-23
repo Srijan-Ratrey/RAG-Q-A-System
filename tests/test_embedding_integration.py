@@ -14,20 +14,29 @@ from conftest import insert_chunks
 @pytest.fixture(scope="module")
 def embedding_cls():
     from rag_qa.embedding_system import EmbeddingSystem
+
     try:
         # Probe: construct once so a missing model skips instead of erroring.
-        EmbeddingSystem(db_path=":memory:",
-                        index_path="/tmp/_probe.bin",
-                        chunk_id_map_path="/tmp/_probe.json")
+        EmbeddingSystem(
+            db_path=":memory:",
+            index_path="/tmp/_probe.bin",
+            chunk_id_map_path="/tmp/_probe.json",
+        )
     except Exception as e:  # pragma: no cover - environment dependent
         pytest.skip(f"embedding model unavailable: {e}")
     return EmbeddingSystem
 
 
 def _seed(processor, chunk_ids):
-    rows = [{"chunk_id": cid, "text": f"Safety requirement number {cid} for industrial machinery.",
-             "source_file": "doc.pdf", "chunk_index": i}
-            for i, cid in enumerate(chunk_ids)]
+    rows = [
+        {
+            "chunk_id": cid,
+            "text": f"Safety requirement number {cid} for industrial machinery.",
+            "source_file": "doc.pdf",
+            "chunk_index": i,
+        }
+        for i, cid in enumerate(chunk_ids)
+    ]
     insert_chunks(processor.db_path, rows)
 
 
@@ -44,9 +53,17 @@ def test_build_index_and_detect_staleness(embedding_cls, tmp_path, processor):
 
     # Add a chunk without rebuilding -> fingerprint must now report stale.
     with sqlite3.connect(processor.db_path) as conn:
-        insert_chunks(processor.db_path, [
-            {"chunk_id": "d", "text": "New machine guarding requirement added later.",
-             "source_file": "doc.pdf", "chunk_index": 3}])
+        insert_chunks(
+            processor.db_path,
+            [
+                {
+                    "chunk_id": "d",
+                    "text": "New machine guarding requirement added later.",
+                    "source_file": "doc.pdf",
+                    "chunk_index": 3,
+                }
+            ],
+        )
     assert es.is_index_stale() is True
 
 

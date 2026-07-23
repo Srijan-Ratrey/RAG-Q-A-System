@@ -60,10 +60,15 @@ def insert_chunks(db_path, rows):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    r["chunk_id"], r["text"], r.get("source_title", "T"),
-                    r.get("source_url", ""), r.get("source_file", "f.pdf"),
-                    r.get("page_number", 1), r.get("chunk_index", 0),
-                    len(r["text"].split()), len(r["text"]),
+                    r["chunk_id"],
+                    r["text"],
+                    r.get("source_title", "T"),
+                    r.get("source_url", ""),
+                    r.get("source_file", "f.pdf"),
+                    r.get("page_number", 1),
+                    r.get("chunk_index", 0),
+                    len(r["text"].split()),
+                    len(r["text"]),
                 ),
             )
         conn.commit()
@@ -74,12 +79,24 @@ def chunk_db(tmp_path, processor):
     """A DB pre-populated with a few keyword-distinct chunks."""
     db_path = processor.db_path
     rows = [
-        {"chunk_id": "c1", "text": "Emergency stop systems must halt machinery immediately when activated.",
-         "source_file": "osha3170.pdf", "chunk_index": 0},
-        {"chunk_id": "c2", "text": "Risk assessment follows the procedure defined in ISO 12100 for machinery.",
-         "source_file": "sick_guide.pdf", "chunk_index": 0},
-        {"chunk_id": "c3", "text": "Machine guarding protects operators at the point of operation from amputations.",
-         "source_file": "osha3170.pdf", "chunk_index": 1},
+        {
+            "chunk_id": "c1",
+            "text": "Emergency stop systems must halt machinery immediately when activated.",
+            "source_file": "osha3170.pdf",
+            "chunk_index": 0,
+        },
+        {
+            "chunk_id": "c2",
+            "text": "Risk assessment follows the procedure defined in ISO 12100 for machinery.",
+            "source_file": "sick_guide.pdf",
+            "chunk_index": 0,
+        },
+        {
+            "chunk_id": "c3",
+            "text": "Machine guarding protects operators at the point of operation from amputations.",
+            "source_file": "osha3170.pdf",
+            "chunk_index": 1,
+        },
     ]
     insert_chunks(db_path, rows)
     return db_path, rows

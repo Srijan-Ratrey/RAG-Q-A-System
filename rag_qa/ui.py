@@ -45,7 +45,9 @@ def _patch_gradio_schema_bug():
 
     gcu._json_schema_to_python_type = _safe
     _orig_get_type = gcu.get_type
-    gcu.get_type = lambda schema: "Any" if isinstance(schema, bool) else _orig_get_type(schema)
+    gcu.get_type = lambda schema: (
+        "Any" if isinstance(schema, bool) else _orig_get_type(schema)
+    )
 
 
 _patch_gradio_schema_bug()
@@ -78,9 +80,11 @@ def _render_contexts(contexts) -> str:
         page = c.get("page")
         page_str = f", p.{page}" if page else ""
         header = f"**{i}. {source}**{page_str}"
-        scores = (f"score {c.get('score', 0):.3f}  |  "
-                  f"vector {c.get('vector_score', 0):.3f}  |  "
-                  f"bm25 {c.get('bm25_score', 0):.3f}")
+        scores = (
+            f"score {c.get('score', 0):.3f}  |  "
+            f"vector {c.get('vector_score', 0):.3f}  |  "
+            f"bm25 {c.get('bm25_score', 0):.3f}"
+        )
         text = (c.get("text") or "").strip()
         if len(text) > 600:
             text = text[:600].rstrip() + "…"
@@ -116,7 +120,9 @@ def build_index(files, state, progress=gr.Progress()):
         with open(sources_path, "w", encoding="utf-8") as f:
             f.write("[]")
         proc = DocumentProcessor(
-            sources_file=sources_path, pdf_dir=tmp, db_path=db_path,
+            sources_file=sources_path,
+            pdf_dir=tmp,
+            db_path=db_path,
         )
 
         total_chunks, per_file = 0, []
@@ -130,18 +136,25 @@ def build_index(files, state, progress=gr.Progress()):
 
         if total_chunks == 0:
             shutil.rmtree(tmp, ignore_errors=True)
-            return ("⚠️ No extractable text found. Scanned/image-only PDFs "
-                    "aren't supported (no OCR)."), None
+            return (
+                "⚠️ No extractable text found. Scanned/image-only PDFs "
+                "aren't supported (no OCR)."
+            ), None
 
         progress(0.8, desc="Building search index")
         es = EmbeddingSystem(
-            model_name=MODEL_NAME, db_path=db_path, index_path=index_path,
-            chunk_id_map_path=map_path, model=get_model(),
+            model_name=MODEL_NAME,
+            db_path=db_path,
+            index_path=index_path,
+            chunk_id_map_path=map_path,
+            model=get_model(),
         )
         es.build_index(force_rebuild=True)
 
         search_system = SearchSystem(
-            db_path=db_path, embedding_system=es, bm25_cache_path=bm25_path,
+            db_path=db_path,
+            embedding_system=es,
+            bm25_cache_path=bm25_path,
         )
         service = QAService(search_system=search_system)
     except Exception as e:
@@ -149,8 +162,10 @@ def build_index(files, state, progress=gr.Progress()):
         return f"❌ Failed to build index: `{e}`", None
 
     file_list = "\n".join(f"- {n} ({c} chunks)" for n, c in per_file)
-    status = (f"✅ Indexed **{total_chunks} chunks** from **{len(pdfs)} file(s)**. "
-              f"Ask away below.\n\n{file_list}")
+    status = (
+        f"✅ Indexed **{total_chunks} chunks** from **{len(pdfs)} file(s)**. "
+        f"Ask away below.\n\n{file_list}"
+    )
     return status, {"service": service, "tmp": tmp}
 
 
@@ -164,8 +179,14 @@ def answer_query(question, mode, k, state):
     if not question or not question.strip():
         return "Please enter a question.", "", ""
     if not state or not state.get("service"):
-        return ("### ⏳ No index yet\nUpload PDF(s) and click **Build index** "
-                "first, then ask your question."), "", ""
+        return (
+            (
+                "### ⏳ No index yet\nUpload PDF(s) and click **Build index** "
+                "first, then ask your question."
+            ),
+            "",
+            "",
+        )
 
     try:
         resp = state["service"].ask(question.strip(), k=int(k), mode=mode)
@@ -176,11 +197,15 @@ def answer_query(question, mode, k, state):
     if resp.get("answer"):
         answer_md = f"### Answer\n{resp['answer']}"
     else:
-        answer_md = (f"### No answer — the system abstained\n"
-                     f"_{resp.get('abstain_reason', 'Low confidence')}_")
-    meta_md = (f"**Confidence:** {confidence:.3f}  ·  "
-               f"**Mode:** {resp.get('reranker_used', mode)}  ·  "
-               f"**Passages:** {resp.get('total_results', 0)}")
+        answer_md = (
+            f"### No answer — the system abstained\n"
+            f"_{resp.get('abstain_reason', 'Low confidence')}_"
+        )
+    meta_md = (
+        f"**Confidence:** {confidence:.3f}  ·  "
+        f"**Mode:** {resp.get('reranker_used', mode)}  ·  "
+        f"**Passages:** {resp.get('total_results', 0)}"
+    )
     return answer_md, meta_md, _render_contexts(resp.get("contexts", []))
 
 
@@ -199,7 +224,9 @@ def build_demo() -> "gr.Blocks":
         with gr.Row():
             files = gr.Files(
                 label="Drop PDFs here or click to browse",
-                file_count="multiple", file_types=[".pdf"], type="filepath",
+                file_count="multiple",
+                file_types=[".pdf"],
+                type="filepath",
             )
         with gr.Row():
             build_btn = gr.Button("Build index", variant="primary")
@@ -210,7 +237,8 @@ def build_demo() -> "gr.Blocks":
         with gr.Row():
             with gr.Column(scale=3):
                 question = gr.Textbox(
-                    label="Question", lines=2,
+                    label="Question",
+                    lines=2,
                     placeholder="Ask something about the PDFs you uploaded…",
                 )
             with gr.Column(scale=1):
@@ -223,10 +251,16 @@ def build_demo() -> "gr.Blocks":
         sources_out = gr.Markdown()
 
         build_btn.click(build_index, [files, state], [status, state])
-        ask_btn.click(answer_query, [question, mode, k, state],
-                      [answer_out, meta_out, sources_out])
-        question.submit(answer_query, [question, mode, k, state],
-                        [answer_out, meta_out, sources_out])
+        ask_btn.click(
+            answer_query,
+            [question, mode, k, state],
+            [answer_out, meta_out, sources_out],
+        )
+        question.submit(
+            answer_query,
+            [question, mode, k, state],
+            [answer_out, meta_out, sources_out],
+        )
     return demo
 
 
