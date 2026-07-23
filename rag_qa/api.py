@@ -21,7 +21,7 @@ class AnswerGenerator:
     """Generates extractive answers from search results with citations."""
     
     def __init__(self,
-                 confidence_threshold: float = 0.5,
+                 confidence_threshold: float = 0.35,
                  embedding_system=None,
                  num_source_chunks: int = 3,
                  num_answer_sentences: int = 3,
@@ -30,7 +30,14 @@ class AnswerGenerator:
         Initialize answer generator.
 
         Args:
-            confidence_threshold: Minimum confidence for providing an answer
+            confidence_threshold: Minimum confidence for providing an answer.
+                Confidence is the top result's raw cosine similarity from
+                all-MiniLM-L6-v2 (see SearchResult.confidence), whose relevant
+                matches typically fall in ~0.35-0.65 — NOT a 0-1 probability, so
+                do not "round this back up" to 0.5. Off-topic queries are already
+                excluded upstream by SearchSystem.similarity_threshold (they
+                return no results and score 0.0), so this gate only needs to
+                reject weak-but-not-empty matches.
             embedding_system: EmbeddingSystem used to score sentences against
                 the query (enables query-aware extraction). If None, falls back
                 to leading-sentence extraction.
@@ -122,17 +129,21 @@ class AnswerGenerator:
 class QAService:
     """Main Q&A service combining search and answer generation."""
     
-    def __init__(self, 
+    def __init__(self,
                  db_path: str = "data/rag_database.db",
-                 confidence_threshold: float = 0.5):
+                 confidence_threshold: float = 0.35,
+                 search_system: Optional[SearchSystem] = None):
         """
         Initialize Q&A service.
-        
+
         Args:
-            db_path: Path to database
+            db_path: Path to database (used only when search_system is None)
             confidence_threshold: Minimum confidence for answers
+            search_system: A prebuilt SearchSystem to use instead of constructing
+                one from db_path. Lets callers serve a corpus at custom index
+                paths (e.g. the per-session upload UI).
         """
-        self.search_system = SearchSystem(db_path=db_path)
+        self.search_system = search_system or SearchSystem(db_path=db_path)
         self.answer_generator = AnswerGenerator(
             confidence_threshold=confidence_threshold,
             embedding_system=self.search_system.embedding_system,

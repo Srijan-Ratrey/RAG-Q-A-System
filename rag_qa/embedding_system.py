@@ -17,37 +17,44 @@ from sentence_transformers import SentenceTransformer
 class EmbeddingSystem:
     """Manages document embeddings and vector similarity search."""
     
-    def __init__(self, 
+    def __init__(self,
                  model_name: str = "all-MiniLM-L6-v2",
                  db_path: str = "data/rag_database.db",
                  index_path: str = "data/faiss_index.bin",
                  chunk_id_map_path: str = "data/chunk_id_map.json",
-                 batch_size: int = 32):
+                 batch_size: int = 32,
+                 model=None):
         """
         Initialize the embedding system.
-        
+
         Args:
             model_name: Name of the sentence transformer model
             db_path: Path to SQLite database with chunks
             index_path: Path to save/load FAISS index
             chunk_id_map_path: Path to save/load chunk ID mapping
             batch_size: Batch size for embedding generation
+            model: A preloaded SentenceTransformer to reuse instead of loading a
+                fresh one. Lets callers that build many indices (e.g. the upload
+                UI) share a single model instead of reloading it each time.
         """
         self.model_name = model_name
         self.db_path = db_path
         self.index_path = index_path
         self.chunk_id_map_path = chunk_id_map_path
         self.batch_size = batch_size
-        
+
         # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
-        
-        # Initialize model
-        self.logger.info(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name)
+
+        # Initialize model (reuse a preloaded one when provided).
+        if model is not None:
+            self.model = model
+        else:
+            self.logger.info(f"Loading embedding model: {model_name}")
+            self.model = SentenceTransformer(model_name)
         self.embedding_dim = self.model.get_sentence_embedding_dimension()
-        self.logger.info(f"Model loaded. Embedding dimension: {self.embedding_dim}")
+        self.logger.info(f"Model ready. Embedding dimension: {self.embedding_dim}")
         
         # Initialize FAISS index and chunk mapping
         self.index = None
